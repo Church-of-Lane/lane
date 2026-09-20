@@ -94,8 +94,15 @@ public sealed class ModelTurnStage(
         // one gets nothing and pays nothing. Every factory that offers one is taken, not
         // just the first: an API voice session wants audio *and* text deltas, and picking
         // one would leave the other silent depending on registration order.
+        // Last in the list, so the flush at the end of the run finds the voice observer
+        // already done speaking: a line that arrives as text before it has been said out
+        // loud reads as Lane talking over herself.
+        StreamingDeliveryObserver? streaming = StreamingDeliveryObserver.For(ctx, log);
+
         await using IAgentObserver? observer = CompositeAgentObserver.Of(
-            [.. observerFactories.Select(f => f.Create(ctx.Session, ctx.Kind)).OfType<IAgentObserver>()], log);
+            [.. observerFactories.Select(f => f.Create(ctx.Session, ctx.Kind))
+                .Append(streaming)
+                .OfType<IAgentObserver>()], log);
 
         AgentRunResult result = await loop.RunAsync(new AgentRunRequest
         {
@@ -131,6 +138,9 @@ public sealed class ModelTurnStage(
         }, ct).ConfigureAwait(false);
 
         ctx.Result = new TurnResult(result.FinalText, result.NewMessages, result.Stop, result.TotalUsage);
+
+        // The run is over, so every line the observer queued has been sent by now.
+        if (streaming is { Delivered: true }) ctx.Items[DeliveryStage.StreamedKey] = true;
 
         // Everything the run produced is persisted, including the intermediate tool turns:
         // the transcript keeps the full record, and memory strips what it must not replay.
@@ -207,7 +217,7 @@ public sealed class ModelTurnStage(
             ("mood", Mood(ctx)),
             ("energy", Energy(ctx)),
             ("time", formatter.FormatTime(DateTimeOffset.UtcNow,
-                new TranscriptFormatOptions(_options.DisplayOffset, IncludeRelativeTime: false))));
+                new TranscriptFormatOptions(IncludeRelativeTime: false))));
     }
 
     /// <summary>

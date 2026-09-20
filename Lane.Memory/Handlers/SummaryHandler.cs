@@ -78,7 +78,7 @@ public sealed class SummaryHandler(
         LaneMessage[] batch = [.. _pending];
 
         string transcript = formatter.Format(batch, new TranscriptFormatOptions(
-            TimeSpan.Zero, IncludeRelativeTime: false, IncludeSessionLabels: Scope is MemoryScope.Global));
+            IncludeRelativeTime: false, IncludeSessionLabels: Scope is MemoryScope.Global));
 
         ILanguageModel model = models.Get(ModelRole.Summarize);
 

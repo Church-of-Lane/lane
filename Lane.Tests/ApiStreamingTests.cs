@@ -52,10 +52,10 @@ public sealed class ApiStreamingTests
     }
 
     [Fact]
-    public async Task A_turn_nobody_is_watching_is_not_streamed()
+    public async Task A_turn_with_nobody_watching_is_still_streamed_for_the_channel_itself()
     {
-        // Streaming has a cost — a different code path in every provider adapter — and no
-        // benefit when there is no one to show the pieces to.
+        // A channel Lane can write to is an audience of its own: delivery sends each line
+        // as it is finished, which it can only do if the reply arrives in pieces.
         ScriptedLanguageModel model = ScriptedLanguageModel.Echoing("fine");
 
         await using ApiFixture api = await ApiFixture.StartAsync(model);
@@ -64,7 +64,7 @@ public sealed class ApiStreamingTests
 
         await WaitForTurnAsync(api, "api/Api/alpha/quiet");
 
-        Assert.False(model.StreamedLast);
+        Assert.True(model.StreamedLast);
     }
 
     [Fact]

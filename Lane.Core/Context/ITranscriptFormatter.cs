@@ -1,14 +1,15 @@
 using System.Text;
+using Lane.Core.Agent;
 using Lane.Core.Messages;
+using Microsoft.Extensions.Options;
 
 namespace Lane.Core.Context;
 
 public sealed record TranscriptFormatOptions(
-    TimeSpan DisplayOffset,
-    bool     IncludeRelativeTime = true,
-    bool     IncludeSessionLabels = false)
+    bool IncludeRelativeTime = true,
+    bool IncludeSessionLabels = false)
 {
-    public static TranscriptFormatOptions Default { get; } = new(TimeSpan.Zero);
+    public static TranscriptFormatOptions Default { get; } = new();
 }
 
 /// <summary>
@@ -24,8 +25,13 @@ public interface ITranscriptFormatter
 public sealed class TranscriptFormatter : ITranscriptFormatter
 {
     private readonly TimeProvider _time;
+    private readonly TimeSpan     _displayOffset;
 
-    public TranscriptFormatter(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    public TranscriptFormatter(IOptions<AgentOptions>? agent = null, TimeProvider? time = null)
+    {
+        _time          = time ?? TimeProvider.System;
+        _displayOffset = agent?.Value.DisplayOffset ?? TimeSpan.Zero;
+    }
 
     public string Format(IEnumerable<LaneMessage> messages, TranscriptFormatOptions options)
     {
@@ -57,7 +63,7 @@ public sealed class TranscriptFormatter : ITranscriptFormatter
 
     public string FormatTime(DateTimeOffset time, TranscriptFormatOptions options)
     {
-        string stamp = time.ToOffset(options.DisplayOffset).ToString("yyyy/MM/dd HH:mm:ss");
+        string stamp = time.ToOffset(_displayOffset).ToString("yyyy/MM/dd HH:mm:ss");
 
         return options.IncludeRelativeTime ? $"{stamp} ({Relative(_time.GetUtcNow() - time)})" : stamp;
     }

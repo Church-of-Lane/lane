@@ -77,8 +77,7 @@ public sealed class ProfileHandler(
 
         LaneMessage[] batch = [.. _pending];
 
-        string transcript = formatter.Format(batch, new TranscriptFormatOptions(
-            TimeSpan.Zero, IncludeRelativeTime: false));
+        string transcript = formatter.Format(batch, new TranscriptFormatOptions(IncludeRelativeTime: false));
 
         ILanguageModel model = models.Get(ModelRole.Summarize);
 

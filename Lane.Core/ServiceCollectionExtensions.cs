@@ -88,6 +88,11 @@ public static class ServiceCollectionExtensions
         // conversation around it; before the model turn, because the whole point is to not
         // pay for that turn.
         services.AddSingleton<ITurnStage, ResponsePolicyStage>();
+
+        // After the policy, so nothing shows while she is deciding whether to answer at all,
+        // and before the model turn so the indicator covers the whole wait.
+        services.AddSingleton<ITurnStage, TypingStage>();
+
         services.AddSingleton<ITurnStage, ModelTurnStage>();
         services.AddSingleton<ITurnStage, PersistStage>();
         services.AddSingleton<ITurnStage, DeliveryStage>();
@@ -158,6 +163,11 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddLanePrompts(this IServiceCollection services, PromptOptions options)
     {
         services.RemoveAll<IPromptLibrary>();
+        services.RemoveAll<PromptOptions>();
+
+        // Resolvable on its own so providers that read their own files from the prompt
+        // directory do not each need their own configuration section for the path.
+        services.AddSingleton(options);
         services.AddSingleton<IPromptLibrary>(sp =>
             new FilePromptLibrary(options, sp.GetRequiredService<ILogger<FilePromptLibrary>>()));
 

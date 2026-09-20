@@ -148,7 +148,6 @@ public sealed class MemoryService(
     private string Render(MemoryHandlerOptions options, MemoryRecall recall, MemoryContext ctx)
     {
         string body = recall.RenderedText ?? formatter.Format(recall.Messages, new TranscriptFormatOptions(
-            DisplayOffset: TimeSpan.Zero,
             IncludeRelativeTime: true,
             // Global and Surface scopes mix conversations, so the reader needs to know
             // which one each line came from.

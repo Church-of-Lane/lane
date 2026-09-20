@@ -335,7 +335,7 @@ public sealed class MonologueService : BackgroundService, IMonologueScheduler
     private string BuildPrompt()
     {
         string time = _formatter.FormatTime(
-            _time.GetUtcNow(), new TranscriptFormatOptions(TimeSpan.Zero, IncludeRelativeTime: false));
+            _time.GetUtcNow(), new TranscriptFormatOptions(IncludeRelativeTime: false));
 
         if (!_prompts.Has(_options.Prompt))
         {
@@ -390,7 +390,7 @@ public sealed class MonologueService : BackgroundService, IMonologueScheduler
         if (utterances.Length == 0) return [];
 
         string body = _formatter.Format(utterances, new TranscriptFormatOptions(
-            TimeSpan.Zero, IncludeRelativeTime: true, IncludeSessionLabels: true));
+            IncludeRelativeTime: true, IncludeSessionLabels: true));
 
         return [new PromptBlock($"## Recent messages across all conversations\n\n{body}", CacheHint.None)];
     }

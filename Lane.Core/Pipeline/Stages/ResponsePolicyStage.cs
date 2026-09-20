@@ -62,7 +62,6 @@ public sealed class ResponsePolicyStage(
     ISessionDescriptions descriptions,
     ISessionThresholds thresholds,
     IOptions<ResponsePolicyOptions> options,
-    IOptions<Lane.Core.Agent.AgentOptions> agent,
     ILogger<ResponsePolicyStage> log,
     IPresenceSink? presence = null) : ITurnStage
 {
@@ -122,7 +121,7 @@ public sealed class ResponsePolicyStage(
 
             ModelResponse response = await model.CompleteAsync(new ModelRequest
             {
-                System   = [new PromptBlock(Instructions(ctx), CacheHint.Ephemeral)],
+                System   = [new PromptBlock(Instructions(ctx, model.Descriptor), CacheHint.Ephemeral)],
                 Messages = [.. ctx.Incoming],
                 Tools    = [Assess],
 
@@ -205,18 +204,34 @@ public sealed class ResponsePolicyStage(
         return null;
     }
 
-    private string Instructions(TurnContext ctx)
+    private string Instructions(TurnContext ctx, ModelDescriptor model)
     {
         string description = Description(ctx);
 
         // The description goes before the closing instruction rather than after it: what the
         // classifier is being asked to do should still be the last thing it reads.
-        if (!prompts.Has(_options.Prompt)) return Fallback + description + FallbackClose;
+        if (Template(model) is not { } template) return Fallback + description + FallbackClose;
 
-        return prompts.Render(_options.Prompt,
+        return prompts.Render(template,
             ("session", ctx.Descriptor.DisplayName),
             ("description", description),
             ("transcript", Transcript(ctx)));
+    }
+
+    /// <summary>
+    /// Prefers a <c>Routing.{provider}</c> variant over the generic template when one exists.
+    ///
+    /// Not every classifier is asked the question the same way. A System One provider takes its
+    /// levels and options structurally and only wants the conversation as context — handing it
+    /// the scoring bands as prose would be noise, since it never reads them.
+    /// </summary>
+    private string? Template(ModelDescriptor model)
+    {
+        string variant = $"{_options.Prompt}.{model.Provider}";
+
+        if (prompts.Has(variant)) return variant;
+
+        return prompts.Has(_options.Prompt) ? _options.Prompt : null;
     }
 
     /// <summary>
@@ -248,7 +263,7 @@ public sealed class ResponsePolicyStage(
 
         if (recent.Count == 0) return "(nothing yet)";
 
-        return formatter.Format(recent, new TranscriptFormatOptions(agent.Value.DisplayOffset, IncludeRelativeTime: false));
+        return formatter.Format(recent, new TranscriptFormatOptions(IncludeRelativeTime: false));
     }
 
     private const string Fallback =

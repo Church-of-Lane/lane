@@ -12,6 +12,12 @@ namespace Lane.Core.Pipeline.Stages;
 /// </summary>
 public sealed class DeliveryStage(ILogger<DeliveryStage> log) : ITurnStage
 {
+    /// <summary>
+    /// Set by the model turn when <see cref="StreamingDeliveryObserver"/> already wrote the
+    /// reply out line by line, so this stage does not say it a second time.
+    /// </summary>
+    public const string StreamedKey = "delivery.streamed";
+
     public async Task ExecuteAsync(TurnContext ctx, Func<Task> next, CancellationToken ct)
     {
         await DeliverAsync(ctx, ct).ConfigureAwait(false);
@@ -22,6 +28,8 @@ public sealed class DeliveryStage(ILogger<DeliveryStage> log) : ITurnStage
     private async Task DeliverAsync(TurnContext ctx, CancellationToken ct)
     {
         if (ctx.Suppressed || ctx.Result is null) return;
+
+        if (ctx.Items.TryGetValue(StreamedKey, out object? streamed) && streamed is true) return;
 
         string text = ctx.Result.Text;
         if (string.IsNullOrWhiteSpace(text)) return;
@@ -38,18 +46,28 @@ public sealed class DeliveryStage(ILogger<DeliveryStage> log) : ITurnStage
         // most recent thing said, not the one that happened to open the window.
         string? replyTo = ctx.Incoming.LastOrDefault()?.ExternalId;
 
-        OutboundText outbound = new(text, replyTo);
+        // A line break is a message boundary, the same rule streaming delivery follows, so a
+        // reply that never streamed — a directive, or a model that cannot stream — still
+        // arrives as the several messages it was written as.
+        bool first = true;
 
-        foreach (ITextOutput output in outputs)
+        foreach (string line in text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0))
         {
-            try
+            OutboundText outbound = new(line, first ? replyTo : null);
+
+            first = false;
+
+            foreach (ITextOutput output in outputs)
             {
-                await output.SendAsync(outbound, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // One dead channel must not stop the others, nor fail the turn.
-                log.LogError(ex, "Failed to deliver to a channel on {Session}", ctx.Session.Id);
+                try
+                {
+                    await output.SendAsync(outbound, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // One dead channel must not stop the others, nor fail the turn.
+                    log.LogError(ex, "Failed to deliver to a channel on {Session}", ctx.Session.Id);
+                }
             }
         }
     }

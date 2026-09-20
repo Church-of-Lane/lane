@@ -43,6 +43,10 @@
     <Content Include="Prompts/*.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Question sets for System One providers, which take criteria where the others take prose. -->
+    <Content Include="Prompts/*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="../Resources/Books/*.txt" LinkBase="Books">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

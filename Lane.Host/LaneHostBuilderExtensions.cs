@@ -30,6 +30,7 @@ using Lane.Tools;
 using Lane.Tools.Mcp;
 using Lane.Providers.Anthropic;
 using Lane.Providers.OpenAi;
+using Lane.Providers.TypeSafe;
 using Lane.Surfaces.Api;
 using Lane.Surfaces.Discord;
 using Lane.Surfaces.Terminal;
@@ -121,7 +122,38 @@ public static class LaneHostBuilderExtensions
         if (registry is LanguageModelRegistry concrete)
             concrete.ValidateCapabilities([ModelRole.Respond, ModelRole.Monologue]);
 
+        ValidateEvaluatorRoles(registry);
+
         return host;
+    }
+
+    /// <summary>
+    /// Holds System One models to the one role they can serve.
+    ///
+    /// Jev evaluates typed questions and produces no prose, so a binding to "respond" or
+    /// "summarize" is not a degraded answer but no answer at all. The capability check above
+    /// cannot see this — the roles it guards are the ones this model has no business in — so
+    /// the binding itself is what gets checked, at startup, where every other misbinding is caught.
+    /// </summary>
+    private static void ValidateEvaluatorRoles(ILanguageModelRegistry registry)
+    {
+        List<string> problems = [];
+
+        foreach ((string role, string instance) in registry.RoleBindings)
+        {
+            if (role.Equals(ModelRole.Routing.Value, StringComparison.OrdinalIgnoreCase)) continue;
+
+            ILanguageModel model = registry.All.First(m =>
+                m.Descriptor.InstanceId.Equals(instance, StringComparison.OrdinalIgnoreCase));
+
+            if (model.Descriptor.Provider.Equals(JevModel.ProviderName, StringComparison.OrdinalIgnoreCase))
+                problems.Add($"role '{role}' → {model.Descriptor}");
+        }
+
+        if (problems.Count > 0)
+            throw new ModelBindingException(
+                $"The '{JevModel.ProviderName}' provider evaluates typed questions and cannot generate " +
+                $"text, so it serves the '{ModelRole.Routing}' role only: " + string.Join("; ", problems) + ".");
     }
 
     /// <summary>
@@ -545,7 +577,8 @@ public static class LaneHostBuilderExtensions
     private static readonly Dictionary<string, string> KnownEndpoints = new(StringComparer.OrdinalIgnoreCase)
     {
         ["openrouter"] = "https://openrouter.ai/api/v1",
-        ["deepseek"]   = "https://api.deepseek.com/v1"
+        ["deepseek"]   = "https://api.deepseek.com/v1",
+        ["typesafe"]   = JevModel.DefaultEndpoint
     };
 
     /// <summary>The pool is registered whether or not the listener is enabled, so a "node" model
@@ -605,6 +638,8 @@ public static class LaneHostBuilderExtensions
 
             "node" => CreateNodeModel(options, sp),
 
+            "typesafe" => CreateJevModel(options, sp, RequireKey()),
+
             // One adapter serves every OpenAI-compatible endpoint; only the URL differs.
             "openrouter" or "deepseek" or "openai-compatible" => new OpenAiCompatibleModel(
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient($"model:{options.Id}"),
@@ -620,7 +655,7 @@ public static class LaneHostBuilderExtensions
 
             _ => throw new InvalidOperationException(
                 $"Model instance '{options.Id}' names unknown provider '{options.Provider}'. " +
-                "Known providers: anthropic, openrouter, deepseek, openai-compatible, node.")
+                "Known providers: anthropic, openrouter, deepseek, openai-compatible, typesafe, node.")
         };
 
         if (sp.GetService<IResponseRecorder>() is { } recorder) model = new RecordingLanguageModel(model, recorder);
@@ -630,6 +665,34 @@ public static class LaneHostBuilderExtensions
         // the bindings from the registry anyway.
         return new TelemetryLanguageModel(model, bus);
     }
+
+    /// <summary>
+    /// Jev takes its criteria from a question set beside the prompt templates rather than from
+    /// a prompt, so the roster can be retuned without a rebuild.
+    /// </summary>
+    private static JevModel CreateJevModel(ModelInstanceOptions options, IServiceProvider sp, string apiKey)
+    {
+        PromptOptions prompts = sp.GetRequiredService<PromptOptions>();
+
+        string directory = Path.IsPathRooted(prompts.Directory)
+            ? prompts.Directory
+            : Path.Combine(AppContext.BaseDirectory, prompts.Directory);
+
+        return new JevModel(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient($"model:{options.Id}"),
+            new JevOptions
+            {
+                InstanceId = options.Id,
+                ApiKey     = apiKey,
+                Model      = string.IsNullOrWhiteSpace(options.Model) ? "jev-latest" : options.Model,
+                Endpoint   = ResolveEndpoint(options),
+                Profile    = JevRoutingProfile.Load(Path.Combine(directory, JevQuestionSet))
+            },
+            sp.GetRequiredService<ILogger<JevModel>>());
+    }
+
+    /// <summary>Sits next to Routing.typesafe.md, which carries the conversation it evaluates.</summary>
+    private const string JevQuestionSet = "Routing.typesafe.json";
 
     private static NodeLanguageModel CreateNodeModel(ModelInstanceOptions options, IServiceProvider sp)
     {

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using Lane.Core.Context;
 using Lane.Core.Identity;
 using Lane.Core.Kernel;
 using Lane.Core.Monologue;
@@ -131,7 +132,14 @@ public sealed class ScheduleNextThoughtTool : Tool<ScheduleNextThoughtTool.Args>
 
         DateTimeOffset? next = scheduler.Status.NextThoughtAt;
 
-        return ValueTask.FromResult(ToolResult.Ok(
-            next is null ? "Scheduled." : $"Next thought at {next:HH:mm:ss} UTC."));
+        if (next is null) return ValueTask.FromResult(ToolResult.Ok("Scheduled."));
+
+        ITranscriptFormatter? formatter = context.Services.GetService<ITranscriptFormatter>();
+
+        string when = formatter is null
+            ? next.Value.ToString("HH:mm:ss")
+            : formatter.FormatTime(next.Value, new TranscriptFormatOptions(IncludeRelativeTime: false));
+
+        return ValueTask.FromResult(ToolResult.Ok($"Next thought at {when}."));
     }
 }

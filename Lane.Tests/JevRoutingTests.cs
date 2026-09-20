@@ -6,6 +6,8 @@ using Lane.Core.Messages;
 using Lane.Core.Models;
 using Lane.Core.Sessions;
 using Lane.Core.Tools;
+using Lane.Host;
+using Lane.Host.Configuration;
 using Lane.Providers.TypeSafe;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -47,11 +49,15 @@ public sealed class JevRoutingTests
 
         public List<JsonElement> Sent { get; } = [];
 
+        public List<Uri> Uris { get; } = [];
+
         public int Calls => _next;
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
         {
+            Uris.Add(request.RequestUri!);
+
             Sent.Add(JsonDocument.Parse(
                 await request.Content!.ReadAsStringAsync(ct)).RootElement.Clone());
 
@@ -64,8 +70,8 @@ public sealed class JevRoutingTests
         }
     }
 
-    private static JevModel Model(Stub stub, JevRoutingProfile? profile = null) => new(
-        new HttpClient(stub) { BaseAddress = new Uri(JevModel.DefaultEndpoint + "/") },
+    private static JevModel Model(Stub stub, JevRoutingProfile? profile = null, string? endpoint = null) => new(
+        new HttpClient(stub) { BaseAddress = new Uri((endpoint ?? JevModel.DefaultEndpoint) + "/") },
         new JevOptions { InstanceId = "jev", ApiKey = "k", Profile = profile ?? new JevRoutingProfile() },
         NullLogger<JevModel>.Instance);
 
@@ -173,6 +179,44 @@ public sealed class JevRoutingTests
                 .CompleteAsync(prose, TestContext.Current.CancellationToken));
 
         Assert.Contains("cannot generate text", error.Message);
+    }
+
+    [Fact]
+    public async Task Routed_through_OpenRouter_the_body_is_unchanged_and_the_path_is_not_doubled()
+    {
+        Stub stub = new((HttpStatusCode.OK, Answered));
+
+        JevModel model = Model(stub, endpoint: JevModel.OpenRouterEndpoint);
+
+        await model.CompleteAsync(
+            GateRequest(FromUser("alice", "hey Lane")), TestContext.Current.CancellationToken);
+
+        // OpenRouter proxies System One on its own path. Borrowing the chat models' base URL,
+        // which already ends in /v1, would reach /api/v1/v1/systemone.
+        Assert.Equal("https://openrouter.ai/api/v1/systemone", stub.Uris.Single().ToString());
+
+        // Same shape either way — only the host and the key change.
+        JsonElement sent = stub.Sent.Single();
+
+        Assert.Equal("jev-latest", sent.GetProperty("model").GetString());
+        Assert.True(sent.TryGetProperty("state", out _));
+        Assert.True(sent.GetProperty("questions").TryGetProperty("enthusiasm", out _));
+
+        // The transport must not change which prompt template or role guard applies.
+        Assert.Equal(JevModel.ProviderName, model.Descriptor.Provider);
+    }
+
+    [Theory]
+    [InlineData(false, "", "https://api.typesafe.ai")]
+    [InlineData(true,  "", "https://openrouter.ai/api")]
+    [InlineData(true,  "https://gateway.internal", "https://gateway.internal")]
+    public void The_toggle_picks_the_host_unless_one_was_named_outright(
+        bool viaOpenRouter, string endpoint, string expected)
+    {
+        Assert.Equal(expected, LaneHostBuilderExtensions.JevEndpoint(new ModelInstanceOptions
+        {
+            Id = "jev", Provider = JevModel.ProviderName, ViaOpenRouter = viaOpenRouter, Endpoint = endpoint
+        }));
     }
 
     [Fact]

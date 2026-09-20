@@ -685,7 +685,10 @@ public static class LaneHostBuilderExtensions
                 InstanceId = options.Id,
                 ApiKey     = apiKey,
                 Model      = string.IsNullOrWhiteSpace(options.Model) ? "jev-latest" : options.Model,
-                Endpoint   = ResolveEndpoint(options),
+                Endpoint   = JevEndpoint(options),
+                Headers    = options.ViaOpenRouter
+                    ? new Dictionary<string, string> { ["X-Title"] = "Lane" }
+                    : new Dictionary<string, string>(),
                 Profile    = JevRoutingProfile.Load(Path.Combine(directory, JevQuestionSet))
             },
             sp.GetRequiredService<ILogger<JevModel>>());
@@ -693,6 +696,18 @@ public static class LaneHostBuilderExtensions
 
     /// <summary>Sits next to Routing.typesafe.md, which carries the conversation it evaluates.</summary>
     private const string JevQuestionSet = "Routing.typesafe.json";
+
+    /// <summary>
+    /// An explicit endpoint always wins, then the OpenRouter toggle, then the provider's own
+    /// API. The toggle is not the chat models' OpenRouter base URL — System One is proxied on
+    /// its own path, and reusing that entry would send the request to /api/v1/v1/systemone.
+    /// </summary>
+    internal static string JevEndpoint(ModelInstanceOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.Endpoint)) return options.Endpoint;
+
+        return options.ViaOpenRouter ? JevModel.OpenRouterEndpoint : ResolveEndpoint(options);
+    }
 
     private static NodeLanguageModel CreateNodeModel(ModelInstanceOptions options, IServiceProvider sp)
     {

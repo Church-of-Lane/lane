@@ -60,6 +60,17 @@ public sealed class ModelInstanceOptions
     public string Pool { get; set; } = "";
 
     /// <summary>
+    /// Reach this provider's own API through OpenRouter instead of directly.
+    ///
+    /// Only meaningful for providers OpenRouter fronts on their native shape rather than as
+    /// chat completions — "typesafe" is the one today, whose System One endpoint OpenRouter
+    /// proxies verbatim. The provider is unchanged by this: only the host it is asked at, and
+    /// therefore which key <see cref="KeyRef"/> has to name. An explicit
+    /// <see cref="Endpoint"/> still wins over it.
+    /// </summary>
+    public bool ViaOpenRouter { get; set; }
+
+    /// <summary>
     /// What this model can do, e.g. <c>["Tools","Streaming"]</c>. Declared per instance
     /// because an endpoint like OpenRouter fronts models with wildly different support.
     /// Omit to assume tool calling, which startup validation then holds the model to.

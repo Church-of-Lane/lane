@@ -21,7 +21,7 @@ everything globally while still replying only where she was addressed.
 | Project | Holds |
 |---|---|
 | `Lane.Core` | Identity, `LaneMessage`, session pump, turn pipeline, prompt library, and the `ILanguageModel` / `ITool` / memory *abstractions*. Depends on nothing provider-shaped — that constraint is what makes "N of a kind" enforceable. |
-| `Lane.Providers` | Anthropic and OpenAI-compatible (OpenRouter, DeepSeek, any compatible endpoint) adapters. |
+| `Lane.Providers` | Anthropic, OpenAI-compatible (OpenRouter, DeepSeek, any compatible endpoint) and TypeSafe System One adapters. |
 | `Lane.Audio` | Ported DSP, continuous recognition, streaming synthesis, the audio router and the voice floor. |
 | `Lane.Memory` | SQLite state / transcript / key-value stores, the sliding-window, summary and profile handlers, the flush and maintenance service. |
 | `Lane.Tools` | The built-in abilities: `web_search`, `fetch_url`, `read_book`, `list_books`, `set_emoticon`, `list_voice_channels`, `join_voice_channel`, `link_identity`, `set_my_name`, `set_session_description`, and the scratchpad (`write_note`, `read_note`, `list_notes`, `delete_note`). |
@@ -677,6 +677,20 @@ and startup holds it to that:
 ```jsonc
 { "Id": "default", "Provider": "openrouter", "Model": "deepseek/deepseek-v4-flash",
   "KeyRef": "env:OPENROUTER_API_KEY", "Capabilities": ["Tools", "Streaming"] }
+```
+
+**One role does not want prose at all.** The response policy gate asks whether Lane should
+reply and how warmly — a decision, not a sentence. TypeSafe's Jev is a System One model
+built for exactly that: it evaluates typed *questions* against a *state* and returns
+structured answers, so the gate's two fields become a Score and a Choice in a single call.
+It cannot generate text, so `ValidateEvaluatorRoles` refuses to let it serve any role but
+`routing`, and its criteria live in `Prompts/Routing.typesafe.json` rather than in a prompt.
+`ViaOpenRouter` sends the same body to OpenRouter instead of TypeSafe, which fronts System
+One on its native shape rather than as chat completions:
+
+```jsonc
+{ "Id": "jev", "Provider": "typesafe", "Model": "jev-latest",
+  "ViaOpenRouter": true, "KeyRef": "env:OPENROUTER_API_KEY" }
 ```
 
 **The transcript and memory are different things, deliberately.** The transcript is the

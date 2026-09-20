@@ -23,6 +23,9 @@ public sealed class JevOptions
     /// <summary>Relative to <see cref="Endpoint"/>.</summary>
     public string EvaluatePath { get; init; } = "v1/systemone";
 
+    /// <summary>Added to every request. Carries OpenRouter's attribution header when fronted by it.</summary>
+    public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
+
     public JevRoutingProfile Profile { get; init; } = new();
 
     /// <summary>Attempts after the first, for 429 and 529 only.</summary>
@@ -49,6 +52,13 @@ public sealed class JevModel : ILanguageModel
     public const string DefaultEndpoint = "https://api.typesafe.ai";
     public const string ProviderName    = "typesafe";
 
+    /// <summary>
+    /// OpenRouter fronts System One on its own shape rather than as chat completions, so the
+    /// same body reaches the same path and only the host and the key change. Deliberately not
+    /// the "/api/v1" the chat models use: the path below already carries the version.
+    /// </summary>
+    public const string OpenRouterEndpoint = "https://openrouter.ai/api";
+
     private const string EnthusiasmQuestion = "enthusiasm";
     private const string EmoticonQuestion   = "emoticon";
 
@@ -68,6 +78,11 @@ public sealed class JevModel : ILanguageModel
         _http.BaseAddress ??= new Uri(options.Endpoint.TrimEnd('/') + "/");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
 
+        foreach ((string name, string value) in options.Headers)
+            _http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+
+        // Unchanged by the transport: the descriptor's provider is what selects the
+        // Routing.typesafe template and what the role guard checks.
         Descriptor = new ModelDescriptor(
             options.InstanceId, ProviderName, options.Model, ModelCapabilities.StructuredOutput);
     }

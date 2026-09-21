@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Lane.Node.Sdk</RootNamespace>
+
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Lane.Node.Sdk</PackageId>
+    <Description>Write a Lane node: lend Lane a model over a WebSocket with reconnection, concurrency, cancellation and signing handled for you.</Description>
+    <PackageTags>lane;llm;node;sdk;websocket</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

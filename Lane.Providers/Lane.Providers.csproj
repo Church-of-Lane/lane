@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Lane.Providers</RootNamespace>
+
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Lane.Providers</PackageId>
+    <Description>Model providers for Lane: Anthropic, OpenAI-compatible endpoints (OpenRouter, DeepSeek) and TypeSafe System One.</Description>
+    <PackageTags>lane;llm;anthropic;openai;openrouter</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

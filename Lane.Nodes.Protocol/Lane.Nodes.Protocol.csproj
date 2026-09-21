@@ -5,6 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Lane.Nodes.Protocol</RootNamespace>
+
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Lane.Nodes.Protocol</PackageId>
+    <Description>The wire protocol spoken between Lane and its nodes: message types, JSON settings and signing.</Description>
+    <PackageTags>lane;llm;node;protocol;websocket</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

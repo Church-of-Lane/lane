@@ -1,0 +1,25 @@
+<Project>
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+
+    <Version>0.1.0</Version>
+    <Authors>Jahan Rashidi</Authors>
+    <Copyright>Copyright (c) 2026 Jahan Rashidi</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://lane-bot.readthedocs.io</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Church-of-Lane/lane</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>lane;chatbot;llm;agent</PackageTags>
+
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true' Or '$(CI)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

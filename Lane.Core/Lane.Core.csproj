@@ -6,6 +6,12 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <RootNamespace>Lane.Core</RootNamespace>
+
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Lane.Core</PackageId>
+    <Description>Core abstractions for Lane: identity, messages, sessions, the turn pipeline, prompts, and the model, tool and memory contracts.</Description>
+    <PackageTags>lane;chatbot;llm;agent</PackageTags>
   </PropertyGroup>
 
   <!--

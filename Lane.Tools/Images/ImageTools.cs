@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using Lane.Core.Memory;
 using Lane.Core.Messages;
+using Lane.Core.Sessions;
 using Lane.Core.Tools;
 using Lane.Tools.Notes;
 using Microsoft.Extensions.Logging;
@@ -234,6 +235,62 @@ public sealed class ViewImageTool(IKeyValueStore store) : Tool<ViewImageTool.Arg
             Content = [new TextPart($"{header} (saved {Scratchpad.Ago(image.SavedAt)} from {image.Source})"),
                        new ImagePart(null, data.Data, image.MediaType)]
         };
+    }
+}
+
+/// <summary>Posts a saved image into the conversation. Only offered where the channel can carry images.</summary>
+[LaneTool]
+public sealed class SendImageTool(IKeyValueStore store) : Tool<SendImageTool.Args>
+{
+    public sealed record Args(
+        [property: Description("Name of the image, as list_images gives it.")] string Name,
+        [property: Description("Text to send with it. Optional.")] string? Message = null);
+
+    protected override string Name => "send_image";
+
+    protected override string Description => "Send one of your saved images into the conversation.";
+
+    protected override ToolSafety Safety => ToolSafety.Mutating;
+
+    protected override ToolAvailability Availability => new()
+    {
+        RequiredCapabilities = ChannelCapabilities.Images,
+        AllowedTurns         = TurnKind.Respond,
+        RequiresSession      = true
+    };
+
+    protected override async ValueTask<ToolResult> InvokeAsync(Args args, ToolContext context, CancellationToken ct)
+    {
+        string? key = ImageShelf.KeyFor(args.Name);
+
+        if (key is null) return ToolResult.Error("Which image? Try list_images.");
+
+        SavedImage? image = await store.GetAsync<SavedImage>(ImageShelf.Scope, key, ct).ConfigureAwait(false);
+        SavedImageData? data = image is null
+            ? null
+            : await store.GetAsync<SavedImageData>(ImageShelf.Scope, ImageShelf.DataKeyFor(key), ct).ConfigureAwait(false);
+
+        if (image is null || data is null)
+            return ToolResult.Error($"You have no image called '{args.Name?.Trim()}'. Try list_images.");
+
+        if (context.Session is not { } id || context.Sessions is null ||
+            !context.Sessions.TryGet(id, out Session? session))
+            return ToolResult.Error("I cannot tell which conversation this is.");
+
+        IReadOnlyList<ITextOutput> outputs =
+            session.ResolveOutputs<ITextOutput>(DeliveryTarget.Requiring(ChannelCapabilities.Images));
+
+        if (outputs.Count == 0) return ToolResult.Error("You cannot send images here.");
+
+        string text = args.Message?.Trim() ?? "";
+
+        await outputs[0].SendAsync(
+            new OutboundText(text, context.TriggerExternalId, [new ImagePart(null, data.Data, image.MediaType)]),
+            ct).ConfigureAwait(false);
+
+        return ToolResult.Ok($"Sent '{image.Name}'.")
+                         .RememberAs($"[sent the image '{image.Name}'{(image.Caption is null ? "" : $": {image.Caption}")}]",
+                                     MemoryScopeHint.CurrentSession);
     }
 }
 

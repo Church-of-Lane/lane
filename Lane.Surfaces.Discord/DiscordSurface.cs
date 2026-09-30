@@ -472,7 +472,18 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
 
             if (_options.RequireOptIn && !message.Author.IsBot &&
                 !await _consent.IsOptedInAsync(message.Author.Id, _lifetime?.Token ?? CancellationToken.None).ConfigureAwait(false))
+            {
+                if (message.MentionedUsers.Any(u => u.Id == _client.Id) &&
+                    !_options.Channels.Exclude.Contains(message.ChannelId))
+                    await _client.Rest.SendMessageAsync(message.ChannelId, new MessageProperties
+                    {
+                        Content          = DiscordCommands.OptInRequired,
+                        AllowedMentions  = AllowedMentionsProperties.None,
+                        MessageReference = MessageReferenceProperties.Reply(message.Id, failIfNotExists: false)
+                    }, cancellationToken: _lifetime?.Token ?? CancellationToken.None).ConfigureAwait(false);
+
                 return;
+            }
 
             bool isDirect = message.GuildId is null;
 

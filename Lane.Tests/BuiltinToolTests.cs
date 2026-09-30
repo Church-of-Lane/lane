@@ -1,4 +1,7 @@
+using Lane.Core.Identity;
 using Lane.Core.Messages;
+using Lane.Core.Sessions;
+using Lane.Testing;
 using Lane.Tools.Images;
 using System.Text.Json;
 using Lane.Core.Memory;
@@ -426,6 +429,56 @@ public sealed class BuiltinToolTests : IDisposable
         Assert.False((await Invoke(new DeleteImageTool(store), new { name = "cat" })).IsError);
         Assert.True((await Invoke(new ViewImageTool(store), new { name = "cat" })).IsError);
         Assert.Empty(await store.ListKeysAsync(new ScopeKey("global"), "image", default));
+    }
+
+    private sealed class CapturingChannel(SessionId id)
+        : SessionChannelBase(id, id.Surface, ChannelCapabilities.Text | ChannelCapabilities.Images), ITextOutput
+    {
+        public List<OutboundText> Sent { get; } = [];
+
+        public Task SendAsync(OutboundText text, CancellationToken ct)
+        {
+            Sent.Add(text);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task A_saved_image_can_be_sent_into_the_conversation()
+    {
+        IKeyValueStore store = Positions();
+
+        SaveImageTool save = new(store, new StubHttp(Png), NullLogger<SaveImageTool>.Instance);
+        Assert.False((await Invoke(save, new { url = "https://cdn.example/cat.png", name = "Cat" })).IsError);
+
+        await using LaneHarness harness = LaneHarness.Create();
+
+        SessionId room = new(new SurfaceId("discord.main"), SessionKind.Text, "general");
+
+        harness.Sessions.GetOrCreate(new SessionDescriptor
+        {
+            Id           = room,
+            DisplayName  = "#general",
+            MemoryGroup  = "g1",
+            Capabilities = ChannelCapabilities.Text | ChannelCapabilities.Images
+        });
+
+        CapturingChannel channel = new(room);
+        using IDisposable attachment = harness.Sessions.Attach(channel);
+
+        ToolContext context = Context() with { Session = room, Sessions = harness.Sessions, TriggerExternalId = "42" };
+
+        ToolResult sent = await ((ITool)new SendImageTool(store)).InvokeAsync(
+            new ToolInvocation("c1", JsonSerializer.SerializeToElement(new { name = "cat", message = "look" }), context), default);
+
+        Assert.False(sent.IsError, sent.Text);
+
+        OutboundText message = Assert.Single(channel.Sent);
+        Assert.Equal("look", message.Text);
+        Assert.Equal("42", message.ReplyToExternalId);
+
+        ImagePart image = Assert.IsType<ImagePart>(Assert.Single(message.Attachments!));
+        Assert.Equal(Png, image.Data!.Value.ToArray());
     }
 
     [Fact]

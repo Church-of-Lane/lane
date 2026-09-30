@@ -140,6 +140,16 @@ internal static class DiscordMapper
                 : $"[file: {a.FileName}] {a.Url}"));
     }
 
+    /// <summary>A file name for an outgoing image, with the extension Discord needs to show it inline.</summary>
+    public static string AttachmentFileName(int index, string mediaType) =>
+        $"image{(index == 0 ? "" : $"-{index + 1}")}.{mediaType switch
+        {
+            "image/jpeg" => "jpg",
+            "image/gif"  => "gif",
+            "image/webp" => "webp",
+            _            => "png"
+        }}";
+
     // ---- embeds ------------------------------------------------------------
 
     /// <summary>Embeds rendered per message. Discord allows ten; past a few it is spam.</summary>

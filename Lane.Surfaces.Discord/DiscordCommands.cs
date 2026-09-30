@@ -29,6 +29,11 @@ public static class DiscordCommands
         _                => null
     };
 
+    /// <summary>Sent when someone who has not opted in mentions the bot.</summary>
+    public const string OptInRequired =
+        $"Before Lane can read or respond to your messages, you need to accept the Terms of Service " +
+        $"(<{TermsOfServiceUrl}>) and Privacy Policy (<{PrivacyPolicyUrl}>). Run /opt-in to accept them.";
+
     /// <summary>True for /opt-in, false for /opt-out, null for commands that do not change consent.</summary>
     public static bool? ConsentSetBy(string command) => command switch
     {

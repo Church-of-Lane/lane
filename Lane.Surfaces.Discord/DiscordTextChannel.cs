@@ -1,4 +1,5 @@
 using Lane.Core.Identity;
+using Lane.Core.Messages;
 using Lane.Core.Sessions;
 using Microsoft.Extensions.Logging;
 using NetCord.Rest;
@@ -25,14 +26,17 @@ internal sealed class DiscordTextChannel(
     public async Task SendAsync(OutboundText text, CancellationToken ct)
     {
         IReadOnlyList<string> parts = DiscordMapper.Split(text.Text);
+        IReadOnlyList<ImagePart> images = [.. text.Attachments?.OfType<ImagePart>().Where(i => i.Data is not null) ?? []];
+
+        if (parts.Count == 0 && images.Count > 0) parts = [""];
 
         bool first = true;
 
-        foreach (string part in parts)
+        for (int i = 0; i < parts.Count; i++)
         {
             MessageProperties message = new()
             {
-                Content = part,
+                Content = parts[i],
 
                 // Lane must not be able to ping a role or @everyone by happening to write
                 // the words. Anything she says that looks like a mention stays inert text.
@@ -43,6 +47,12 @@ internal sealed class DiscordTextChannel(
             if (first && options.ReplyInThread &&
                 ulong.TryParse(text.ReplyToExternalId, out ulong replyTo))
                 message.MessageReference = MessageReferenceProperties.Reply(replyTo, failIfNotExists: false);
+
+            // Images ride on the last part, so they appear beneath the whole text.
+            if (i == parts.Count - 1 && images.Count > 0)
+                message.Attachments = [.. images.Select((image, n) =>
+                    new AttachmentProperties(DiscordMapper.AttachmentFileName(n, image.MediaType),
+                                             new MemoryStream(image.Data!.Value.ToArray())))];
 
             try
             {

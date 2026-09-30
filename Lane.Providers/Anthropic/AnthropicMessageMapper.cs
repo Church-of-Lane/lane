@@ -108,8 +108,8 @@ internal static class AnthropicMessageMapper
                     wroteText = true;
                     break;
 
-                case ImagePart image when image.Url is not null:
-                    blocks.Add(new ImageBlockParam { Source = new(new UrlImageSource(image.Url.ToString())) });
+                case ImagePart image when ToImageBlock(image) is { } imageBlock:
+                    blocks.Add(imageBlock);
                     break;
 
                 case ToolUsePart tool:
@@ -144,8 +144,43 @@ internal static class AnthropicMessageMapper
         return blocks;
     }
 
-    private static string FlattenToolResult(ToolResultPart result) =>
-        string.Concat(result.Content.OfType<TextPart>().Select(p => p.Text));
+    private static ToolResultBlockParamContent FlattenToolResult(ToolResultPart result)
+    {
+        string text = string.Concat(result.Content.OfType<TextPart>().Select(p => p.Text));
+
+        if (!result.Content.Any(p => p is ImagePart)) return text;
+
+        List<Block> blocks = [];
+
+        if (text.Length > 0) blocks.Add(new TextBlockParam { Text = text });
+
+        foreach (ImagePart image in result.Content.OfType<ImagePart>())
+            if (ToImageBlock(image) is { } block) blocks.Add(block);
+
+        return blocks;
+    }
+
+    private static ImageBlockParam? ToImageBlock(ImagePart image)
+    {
+        if (image.Url is not null) return new ImageBlockParam { Source = new(new UrlImageSource(image.Url.ToString())) };
+
+        if (image.Data is not { } data) return null;
+
+        return new ImageBlockParam
+        {
+            Source = new(new Base64ImageSource
+            {
+                Data      = Convert.ToBase64String(data.Span),
+                MediaType = image.MediaType switch
+                {
+                    "image/png"  => MediaType.ImagePng,
+                    "image/gif"  => MediaType.ImageGif,
+                    "image/webp" => MediaType.ImageWebP,
+                    _            => MediaType.ImageJpeg
+                }
+            })
+        };
+    }
 
     private static Dictionary<string, JsonElement> ToInputDictionary(JsonElement arguments)
     {

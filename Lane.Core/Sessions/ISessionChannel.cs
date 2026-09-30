@@ -30,6 +30,12 @@ public interface ITypingIndicator
     IDisposable BeginTyping();
 }
 
+public interface IReactionOutput
+{
+    /// <summary>Reacts to the message with the given platform id.</summary>
+    Task ReactAsync(string messageExternalId, string emoji, CancellationToken ct);
+}
+
 public interface IPresenceOutput
 {
     Task SetPresenceAsync(string presence, CancellationToken ct);

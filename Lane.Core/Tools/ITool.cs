@@ -34,6 +34,9 @@ public sealed record ToolResult
 
     public IReadOnlyList<ToolObservation> Observations { get; init; } = [];
 
+    /// <summary>Ends the agent run after this round of calls, and suppresses whatever reply has not been sent yet.</summary>
+    public bool EndsTurn { get; init; }
+
     public string Text => string.Concat(Content.OfType<TextPart>().Select(p => p.Text));
 
     public static ToolResult Ok(string text) => new() { Content = [new TextPart(text)] };
@@ -58,6 +61,9 @@ public sealed record ToolContext
     public Participant? Requester { get; init; }
 
     public TurnKind Turn { get; init; } = TurnKind.Respond;
+
+    /// <summary>The platform id of the latest message this turn answers, where it has one.</summary>
+    public string? TriggerExternalId { get; init; }
 
     /// <summary>How worn out she is, so the registry can refuse an expensive call she cannot afford.</summary>
     public EnergyTier Energy { get; init; } = EnergyTier.Rested;

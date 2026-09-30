@@ -31,7 +31,7 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 - **Internal monologue** — one global loop, not one per conversation. She thinks in her own words, schedules her own next thought, and can volunteer a remark into a conversation she names
 - **Energy** — a rolling token budget that changes how she behaves rather than whether she may act: shorter replies, fewer tool steps and slower thoughts when low, sleep at zero, and waking when named
 - **Identities** — one person across Discord, the terminal and the API, linked by configuration or by a proven code, never guessed from a matching name. She can be asked to call you something else, and can recognise you by voice
-- **Tools** — web search, page fetching, book reading, a scratchpad she writes on purpose, per-conversation descriptions, voice-channel control and emoticons. A new ability is one class
+- **Tools** — web search, page fetching, book reading, a scratchpad she writes on purpose, saved images, per-conversation descriptions, voice-channel control, emoticons, Discord reactions, and backing out of a reply the router let through. A new ability is one class
 - **MCP** — configured servers contribute their tools, namespaced and sanitised, retried when down, kept out of the unattended monologue unless a server opts in
 - **Nodes** — other people can lend Lane a model over a WebSocket, earn credits for answering, and spend them to sponsor where she listens
 - **Voice** — streaming TTS through ElevenLabs or local [flite](https://github.com/festvox/flite), Azure STT, barge-in and a per-session floor. She walks into a voice channel when asked rather than at startup

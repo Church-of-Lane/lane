@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Lane.Tools.Replies;
 using System.Text.Json;
 using Lane.Core.Memory;
 using Lane.Core.Messages;
@@ -188,5 +190,27 @@ public sealed class ToolPipelineTests
         // The advertised set is fingerprinted into the cache lineage, so a change that
         // invalidates the prompt cache is visible rather than merely expensive.
         Assert.Contains("tools:", request.CacheLineage);
+    }
+
+    [Fact]
+    public async Task Stop_responding_ends_the_turn_without_saying_anything()
+    {
+        ScriptedLanguageModel model = new((_, call) => call switch
+        {
+            0 => ScriptedLanguageModel.ToolCall("stop_responding", new { reason = "not for me" }, "c1"),
+            _ => ScriptedLanguageModel.Text("This should never be said.")
+        });
+
+        await using LaneHarness harness = LaneHarness.Create(model, services =>
+            services.AddSingleton<IToolSource>(
+                new Source(new StopRespondingTool(NullLogger<StopRespondingTool>.Instance))));
+
+        RecordingChannel channel = harness.OpenSession("terminal", "local");
+
+        await harness.SendAsync(channel, "jahan", "talking to someone else");
+        await channel.QuietAsync();
+
+        Assert.Empty(channel.Sent);
+        Assert.Equal(1, model.CallCount);
     }
 }

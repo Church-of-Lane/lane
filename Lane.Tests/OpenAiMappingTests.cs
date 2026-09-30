@@ -192,4 +192,24 @@ public sealed class OpenAiMappingTests
 
         Assert.Single(messages);
     }
+
+    [Fact]
+    public void An_image_a_tool_returns_follows_the_tool_messages_as_a_user_turn()
+    {
+        Participant lane = Participant.Lane(Surface);
+
+        LaneMessage call = LaneMessage.Assistant(Session, lane,
+            [new ToolUsePart("call_1", "view_image", JsonSerializer.SerializeToElement(new { name = "cat" }))],
+            DateTimeOffset.UtcNow);
+
+        LaneMessage result = LaneMessage.ToolResults(Session, lane,
+            [new ToolResultPart("call_1", [new TextPart("cat"), new ImagePart(null, new byte[] { 1, 2, 3 }, "image/png")], false)],
+            DateTimeOffset.UtcNow);
+
+        JsonArray messages = OpenAiMessageMapper.ToMessages([], [FromUser("alice", "show me"), call, result]);
+
+        Assert.Equal(["user", "assistant", "tool", "user"], messages.Select(RoleOf));
+        Assert.Equal("cat", (string?)messages[2]!["content"]);
+        Assert.Equal("data:image/png;base64,AQID", (string?)messages[3]!["content"]![1]!["image_url"]!["url"]);
+    }
 }

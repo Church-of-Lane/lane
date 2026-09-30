@@ -17,7 +17,8 @@ public enum ChannelCapabilities
     Typing    = 1 << 3,
     Presence  = 1 << 4,
     Files     = 1 << 5,
-    Interrupt = 1 << 6
+    Interrupt = 1 << 6,
+    Reactions = 1 << 7
 }
 
 /// <summary>

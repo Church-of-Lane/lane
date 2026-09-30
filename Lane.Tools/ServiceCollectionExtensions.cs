@@ -1,6 +1,7 @@
 using Lane.Core;
 using Lane.Core.Presence;
 using Lane.Tools.Identity;
+using Lane.Tools.Images;
 using Lane.Tools.Reading;
 using Lane.Tools.Web;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,14 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpClient<IWebSearch, BraveWebSearch>()
                 .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30));
+
+        services.AddHttpClient(ImageShelf.HttpClientName)
+                .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(20))
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    ConnectCallback          = ImageShelf.ConnectPublicAsync,
+                    MaxAutomaticRedirections = 3
+                });
 
         services.AddLaneTools(typeof(ServiceCollectionExtensions).Assembly);
 

@@ -28,6 +28,7 @@ public sealed class StreamingDeliveryObserver(
 
     private Task _sending = Task.CompletedTask;
     private bool _first   = true;
+    private bool _withdrawn;
 
     /// <summary>Whether anything actually reached a channel, so delivery knows not to repeat it.</summary>
     public bool Delivered { get; private set; }
@@ -51,11 +52,17 @@ public sealed class StreamingDeliveryObserver(
 
     public ValueTask OnToolStartAsync(string name, CancellationToken ct) => ValueTask.CompletedTask;
 
-    public ValueTask OnToolEndAsync(string name, ToolResult result, CancellationToken ct) => ValueTask.CompletedTask;
+    public ValueTask OnToolEndAsync(string name, ToolResult result, CancellationToken ct)
+    {
+        if (result.EndsTurn) _withdrawn = true;
+
+        return ValueTask.CompletedTask;
+    }
 
     public async ValueTask OnFinishedAsync(CancellationToken ct)
     {
-        if (_lines.Flush() is { } remaining) Enqueue(remaining);
+        // Lines already sent cannot be taken back, but a half-written one can still be dropped.
+        if (_lines.Flush() is { } remaining && !_withdrawn) Enqueue(remaining);
 
         await DrainAsync().ConfigureAwait(false);
     }

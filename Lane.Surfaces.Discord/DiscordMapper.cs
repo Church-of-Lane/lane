@@ -64,7 +64,8 @@ internal static class DiscordMapper
             MemoryGroup = BuildMemoryGroup(memoryGroupTemplate, surface.Value, guildId, channelId),
 
             // Images are accepted; voice arrives with the audio work.
-            Capabilities = ChannelCapabilities.Text | ChannelCapabilities.Images | ChannelCapabilities.Typing,
+            Capabilities = ChannelCapabilities.Text | ChannelCapabilities.Images | ChannelCapabilities.Typing |
+                           ChannelCapabilities.Reactions,
 
             IsDirect          = isDirect,
             KnownParticipants = participants
@@ -102,6 +103,41 @@ internal static class DiscordMapper
         if (string.IsNullOrWhiteSpace(replyAuthor) || string.IsNullOrWhiteSpace(replyContent)) return content;
 
         return $"{content}\n\n(replying to {replyAuthor}: \"{Truncate(replyContent, QuoteLimit)}\")";
+    }
+
+    /// <summary>
+    /// A unicode emoji as its name, or a custom one written <c>&lt;:name:id&gt;</c>,
+    /// <c>&lt;a:name:id&gt;</c> or <c>name:id</c> as its name and id. Null when there is nothing to react with.
+    /// </summary>
+    public static (string Name, ulong? Id)? ParseEmoji(string? emoji)
+    {
+        if (string.IsNullOrWhiteSpace(emoji)) return null;
+
+        string text = emoji.Trim();
+
+        if (text.StartsWith('<') && text.EndsWith('>')) text = text[1..^1];
+        if (text.StartsWith("a:", StringComparison.Ordinal)) text = text[2..];
+
+        string[] pieces = text.Trim(':').Split(':');
+
+        if (pieces.Length == 2 && pieces[0].Length > 0 && ulong.TryParse(pieces[1], out ulong id))
+            return (pieces[0], id);
+
+        // Discord answers a shortcode such as :thumbsup: with Unknown Emoji.
+        if (text.Contains(':') || text.Any(char.IsAsciiLetter)) return null;
+
+        return (text, null);
+    }
+
+    /// <summary>One line per attachment, so the url of an image or file is something she can quote and pass on.</summary>
+    public static string RenderAttachments(IReadOnlyList<(string FileName, string Url, string? ContentType)> attachments)
+    {
+        if (attachments.Count == 0) return "";
+
+        return string.Join('\n', attachments.Select(a =>
+            a.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true
+                ? $"[image: {a.FileName}] {a.Url}"
+                : $"[file: {a.FileName}] {a.Url}"));
     }
 
     // ---- embeds ------------------------------------------------------------

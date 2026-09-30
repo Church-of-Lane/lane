@@ -51,6 +51,18 @@ internal static class OpenAiMessageMapper
                     });
                 }
 
+                // Tool messages carry text only, so images a tool returned follow as a user turn.
+                JsonArray images = [.. message.Content.OfType<ToolResultPart>()
+                    .SelectMany(p => p.Content.OfType<ImagePart>())
+                    .Select(ToImageContent)
+                    .OfType<JsonNode>()];
+
+                if (images.Count > 0)
+                {
+                    images.Insert(0, new JsonObject { ["type"] = "text", ["text"] = "(the image returned by the tool above)" });
+                    result.Add(new JsonObject { ["role"] = "user", ["content"] = images });
+                }
+
                 continue;
             }
 
@@ -97,17 +109,27 @@ internal static class OpenAiMessageMapper
                     wroteText = true;
                     break;
 
-                case ImagePart image when image.Url is not null:
-                    content.Add(new JsonObject
-                    {
-                        ["type"]      = "image_url",
-                        ["image_url"] = new JsonObject { ["url"] = image.Url.ToString() }
-                    });
+                case ImagePart image when ToImageContent(image) is { } mapped:
+                    content.Add(mapped);
                     break;
             }
         }
 
         return new JsonObject { ["role"] = "user", ["content"] = content };
+    }
+
+    private static JsonObject? ToImageContent(ImagePart image)
+    {
+        string? url = image.Url?.ToString()
+            ?? (image.Data is { } data ? $"data:{image.MediaType};base64,{Convert.ToBase64String(data.Span)}" : null);
+
+        if (url is null) return null;
+
+        return new JsonObject
+        {
+            ["type"]      = "image_url",
+            ["image_url"] = new JsonObject { ["url"] = url }
+        };
     }
 
     private static JsonObject? ToAssistant(LaneMessage message)

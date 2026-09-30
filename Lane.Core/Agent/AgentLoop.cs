@@ -38,7 +38,8 @@ public sealed record AgentRunResult(
     StopReason                 Stop,
     TokenUsage                 TotalUsage,
     IReadOnlyList<ToolCallRecord> ToolCalls,
-    bool                       Cancelled);
+    bool                       Cancelled,
+    bool                       EndedByTool = false);
 
 /// <summary>
 /// Sees the run as it happens.
@@ -86,6 +87,7 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
         TokenUsage usage = default;
         StopReason stop  = StopReason.EndTurn;
         bool cancelled   = false;
+        bool endedByTool = false;
 
         // Held between requesting tools and answering them. If anything goes wrong in that
         // window, the finally block below still answers every outstanding call.
@@ -145,6 +147,14 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
                     log.LogWarning("Tool budget exhausted after {Count} call(s)", calls.Count);
                     break;
                 }
+
+                if (outcomes.FirstOrDefault(o => o.EndsTurn) is { } ending)
+                {
+                    log.LogInformation("{Tool} ended the run", ending.Name);
+                    endedByTool = true;
+                    stop        = StopReason.EndTurn;
+                    break;
+                }
             }
 
             if (stop == StopReason.ToolUse)
@@ -182,7 +192,7 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
             catch (Exception ex) { log.LogWarning(ex, "An agent observer threw on finish"); }
         }
 
-        return new AgentRunResult(produced, observations, SpokenText(produced), stop, usage, calls, cancelled);
+        return new AgentRunResult(produced, observations, SpokenText(produced), stop, usage, calls, cancelled, endedByTool);
     }
 
     /// <summary>
@@ -320,7 +330,8 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
             call.ToolName,
             new ToolResultPart(call.ToolCallId, result.Content, result.IsError),
             result.Observations,
-            Stopwatch.GetElapsedTime(started));
+            Stopwatch.GetElapsedTime(started),
+            result.EndsTurn);
     }
 
     private static ToolOutcome Refused(ToolUsePart call, string reason) => new(
@@ -341,5 +352,6 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
         string Name,
         ToolResultPart Part,
         IReadOnlyList<ToolObservation> Observations,
-        TimeSpan Duration);
+        TimeSpan Duration,
+        bool EndsTurn = false);
 }

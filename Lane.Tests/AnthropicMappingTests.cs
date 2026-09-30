@@ -193,4 +193,27 @@ public sealed class AnthropicMappingTests
 
     private static string TextOf(MessageParam turn) =>
         string.Concat(BlocksOf(turn).Select(b => b.Value).OfType<TextBlockParam>().Select(b => b.Text));
+
+    [Fact]
+    public void An_image_a_tool_returns_is_sent_inside_its_result()
+    {
+        Participant lane = Participant.Lane(Surface);
+
+        LaneMessage call = LaneMessage.Assistant(Session, lane,
+            [new ToolUsePart("call_1", "view_image", JsonSerializer.SerializeToElement(new { name = "cat" }))],
+            DateTimeOffset.UtcNow);
+
+        LaneMessage result = LaneMessage.ToolResults(Session, lane,
+            [new ToolResultPart("call_1", [new TextPart("cat"), new ImagePart(null, new byte[] { 1, 2, 3 }, "image/png")], false)],
+            DateTimeOffset.UtcNow);
+
+        List<MessageParam> mapped = AnthropicMessageMapper.ToMessages([FromUser("alice", "show me"), call, result]);
+
+        ToolResultBlockParam answer = Assert.IsType<ToolResultBlockParam>(BlocksOf(mapped[2]).Single().Value);
+
+        Assert.True(answer.Content!.TryPickBlocks(out IReadOnlyList<Block>? blocks));
+        Assert.True(blocks[1].TryPickImageBlockParam(out ImageBlockParam? image));
+        Assert.True(image.Source.TryPickBase64Image(out Base64ImageSource? source));
+        Assert.Equal("AQID", source.Data);
+    }
 }

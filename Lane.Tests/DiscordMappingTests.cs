@@ -398,4 +398,41 @@ public sealed class IdentityResolverTests
         Assert.Null(person.GlobalUserId);
         Assert.Equal("alice", person.DisplayName);
     }
+
+    // ---- reactions and attachments ----------------------------------------
+
+    [Theory]
+    [InlineData("👍", "👍", null)]
+    [InlineData(" 1️⃣ ", "1️⃣", null)]
+    [InlineData("<:lanewave:1234>", "lanewave", 1234UL)]
+    [InlineData("<a:spin:99>", "spin", 99UL)]
+    [InlineData("lanewave:1234", "lanewave", 1234UL)]
+    public void Emoji_parse_as_unicode_or_custom(string input, string name, ulong? id)
+    {
+        Assert.Equal((name, id), DiscordMapper.ParseEmoji(input));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(":thumbsup:")]
+    [InlineData("thumbsup")]
+    public void Shortcodes_and_words_are_not_emoji(string input)
+    {
+        Assert.Null(DiscordMapper.ParseEmoji(input));
+    }
+
+    [Fact]
+    public void Attachments_are_listed_with_their_urls()
+    {
+        string rendered = DiscordMapper.RenderAttachments(
+        [
+            ("cat.png", "https://cdn.discordapp.com/attachments/1/2/cat.png?ex=1", "image/png"),
+            ("notes.txt", "https://cdn.discordapp.com/attachments/1/3/notes.txt", "text/plain")
+        ]);
+
+        Assert.Equal(
+            "[image: cat.png] https://cdn.discordapp.com/attachments/1/2/cat.png?ex=1\n" +
+            "[file: notes.txt] https://cdn.discordapp.com/attachments/1/3/notes.txt",
+            rendered);
+    }
 }

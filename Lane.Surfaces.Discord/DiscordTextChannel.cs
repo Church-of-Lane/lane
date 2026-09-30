@@ -19,8 +19,8 @@ internal sealed class DiscordTextChannel(
     DiscordSurfaceOptions options,
     ILogger log)
     : SessionChannelBase(id, id.Surface,
-        ChannelCapabilities.Text | ChannelCapabilities.Images | ChannelCapabilities.Typing),
-      ITextOutput, ITypingIndicator
+        ChannelCapabilities.Text | ChannelCapabilities.Images | ChannelCapabilities.Typing | ChannelCapabilities.Reactions),
+      ITextOutput, ITypingIndicator, IReactionOutput
 {
     public async Task SendAsync(OutboundText text, CancellationToken ct)
     {
@@ -56,6 +56,21 @@ internal sealed class DiscordTextChannel(
 
             first = false;
         }
+    }
+
+    public async Task ReactAsync(string messageExternalId, string emoji, CancellationToken ct)
+    {
+        if (!ulong.TryParse(messageExternalId, out ulong messageId))
+            throw new ArgumentException($"'{messageExternalId}' is not a Discord message id.", nameof(messageExternalId));
+
+        if (DiscordMapper.ParseEmoji(emoji) is not { } parsed)
+            throw new ArgumentException($"'{emoji}' is not an emoji.", nameof(emoji));
+
+        ReactionEmojiProperties reaction = parsed.Id is { } id
+            ? new ReactionEmojiProperties(parsed.Name, id)
+            : new ReactionEmojiProperties(parsed.Name);
+
+        await rest.AddMessageReactionAsync(channelId, messageId, reaction, cancellationToken: ct).ConfigureAwait(false);
     }
 
     public IDisposable BeginTyping()

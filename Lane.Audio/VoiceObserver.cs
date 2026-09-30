@@ -28,6 +28,7 @@ public sealed class VoiceObserver(
 
     private IDisposable? _held;
     private Task _playback = Task.CompletedTask;
+    private bool _withdrawn;
 
     public ValueTask OnTextAsync(string delta, CancellationToken ct)
     {
@@ -38,11 +39,16 @@ public sealed class VoiceObserver(
 
     public ValueTask OnToolStartAsync(string name, CancellationToken ct) => ValueTask.CompletedTask;
 
-    public ValueTask OnToolEndAsync(string name, ToolResult result, CancellationToken ct) => ValueTask.CompletedTask;
+    public ValueTask OnToolEndAsync(string name, ToolResult result, CancellationToken ct)
+    {
+        if (result.EndsTurn) _withdrawn = true;
+
+        return ValueTask.CompletedTask;
+    }
 
     public async ValueTask OnFinishedAsync(CancellationToken ct)
     {
-        if (_chunker.Flush() is { } remaining) Enqueue(remaining);
+        if (_chunker.Flush() is { } remaining && !_withdrawn) Enqueue(remaining);
 
         try
         {

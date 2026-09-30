@@ -1,3 +1,5 @@
+using Lane.Core.Messages;
+using Lane.Tools.Images;
 using System.Text.Json;
 using Lane.Core.Memory;
 using Lane.Core.Presence;
@@ -388,5 +390,68 @@ public sealed class BuiltinToolTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(_books)) Directory.Delete(_books, recursive: true);
+    }
+
+    // ---- saved images ------------------------------------------------------
+
+    private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+
+    private sealed class StubHttp(byte[] body) : HttpMessageHandler, IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(this, disposeHandler: false);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(body) });
+    }
+
+    [Fact]
+    public async Task A_saved_image_can_be_listed_viewed_and_thrown_away()
+    {
+        IKeyValueStore store = Positions();
+
+        SaveImageTool save = new(store, new StubHttp(Png), NullLogger<SaveImageTool>.Instance);
+
+        ToolResult saved = await Invoke(save, new { url = "https://cdn.example/cat.png", name = "Cat", caption = "a cat" });
+        Assert.False(saved.IsError, saved.Text);
+
+        Assert.True((await Invoke(save, new { url = "https://cdn.example/cat.png", name = "cat" })).IsError);
+
+        Assert.Contains("Cat (just now): a cat", (await Invoke(new ListImagesTool(store), new { })).Text);
+
+        ToolResult viewed = await Invoke(new ViewImageTool(store), new { name = "  CAT " });
+        ImagePart image = Assert.IsType<ImagePart>(viewed.Content[^1]);
+        Assert.Equal("image/png", image.MediaType);
+        Assert.Equal(Png, image.Data!.Value.ToArray());
+
+        Assert.False((await Invoke(new DeleteImageTool(store), new { name = "cat" })).IsError);
+        Assert.True((await Invoke(new ViewImageTool(store), new { name = "cat" })).IsError);
+        Assert.Empty(await store.ListKeysAsync(new ScopeKey("global"), "image", default));
+    }
+
+    [Fact]
+    public async Task Something_that_is_not_an_image_is_not_saved()
+    {
+        IKeyValueStore store = Positions();
+
+        SaveImageTool save = new(store, new StubHttp("<html></html>"u8.ToArray()), NullLogger<SaveImageTool>.Instance);
+
+        Assert.True((await Invoke(save, new { url = "https://example.com/page", name = "page" })).IsError);
+        Assert.True((await Invoke(save, new { url = "file:///etc/passwd", name = "passwd" })).IsError);
+    }
+
+    [Theory]
+    [InlineData("8.8.8.8", true)]
+    [InlineData("2606:4700::1111", true)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("10.1.2.3", false)]
+    [InlineData("172.20.0.1", false)]
+    [InlineData("192.168.1.1", false)]
+    [InlineData("169.254.169.254", false)]
+    [InlineData("::1", false)]
+    [InlineData("fd00::1", false)]
+    [InlineData("::ffff:127.0.0.1", false)]
+    public void Images_are_only_downloaded_from_public_addresses(string address, bool allowed)
+    {
+        Assert.Equal(allowed, ImageShelf.IsPublic(System.Net.IPAddress.Parse(address)));
     }
 }

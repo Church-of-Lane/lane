@@ -116,6 +116,7 @@ public sealed class ModelTurnStage(
                 Descriptor = ctx.Descriptor,
                 Requester  = RequesterOf(ctx),
                 Turn       = ctx.Kind,
+                TriggerExternalId = ctx.Incoming.LastOrDefault()?.ExternalId,
                 Energy     = tier,
                 Memory     = ctx.Items.TryGetValue("memory", out object? m) && m is MemoryContext mc ? mc : new(),
                 Services   = services,
@@ -147,7 +148,12 @@ public sealed class ModelTurnStage(
         ctx.Produced.AddRange(result.NewMessages);
         ctx.Produced.AddRange(result.Observations);
 
-        if (result.Cancelled)
+        if (result.EndedByTool)
+        {
+            ctx.Suppressed        = true;
+            ctx.SuppressionReason = "chose not to reply";
+        }
+        else if (result.Cancelled)
         {
             // Persist what happened, but do not say a half-finished thing out loud.
             ctx.Suppressed        = true;

@@ -554,6 +554,11 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
         if (DiscordMapper.RenderEmbeds(embeds) is { Length: > 0 } cards)
             text = string.IsNullOrWhiteSpace(text) ? cards : $"{text}\n\n{cards}";
 
+        string files = DiscordMapper.RenderAttachments(
+            [.. message.Attachments.Select(a => (a.FileName, a.Url, a.ContentType))]);
+
+        if (files.Length > 0) text = string.IsNullOrWhiteSpace(text) ? files : $"{text}\n\n{files}";
+
         text = DiscordMapper.AppendReplyContext(
             text,
             message.ReferencedMessage is { } replied

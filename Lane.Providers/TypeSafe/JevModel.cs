@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Jev.Sdk;
+using Jev.Sdk.Exceptions;
+using Jev.Sdk.Models;
 using Lane.Core.Messages;
 using Lane.Core.Models;
 using Lane.Core.Tools;
@@ -19,9 +21,6 @@ public sealed class JevOptions
 
     public string Model    { get; init; } = "jev-latest";
     public string Endpoint { get; init; } = JevModel.DefaultEndpoint;
-
-    /// <summary>Relative to <see cref="Endpoint"/>.</summary>
-    public string EvaluatePath { get; init; } = "v1/systemone";
 
     /// <summary>Added to every request. Carries OpenRouter's attribution header when fronted by it.</summary>
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
@@ -63,23 +62,24 @@ public sealed class JevModel : ILanguageModel
     private const string EmoticonQuestion   = "emoticon";
 
     /// <summary>Not in <see cref="HttpStatusCode"/>: TypeSafe returns it when the service is saturated.</summary>
-    private const int Overloaded = 529;
+    private const HttpStatusCode Overloaded = (HttpStatusCode)529;
 
-    private readonly HttpClient _http;
+    private readonly JevClient _client;
     private readonly JevOptions _options;
     private readonly ILogger<JevModel> _log;
 
     public JevModel(HttpClient http, JevOptions options, ILogger<JevModel> log)
     {
-        _http    = http;
         _options = options;
         _log     = log;
 
-        _http.BaseAddress ??= new Uri(options.Endpoint.TrimEnd('/') + "/");
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+        http.BaseAddress ??= new Uri(options.Endpoint.TrimEnd('/') + "/");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
 
         foreach ((string name, string value) in options.Headers)
-            _http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+            http.DefaultRequestHeaders.TryAddWithoutValidation(name, value);
+
+        _client = new JevClient(new HttpClient(new RelativePathHandler(http)) { BaseAddress = http.BaseAddress });
 
         // Unchanged by the transport: the descriptor's provider is what selects the
         // Routing.typesafe template and what the role guard checks.
@@ -95,27 +95,28 @@ public sealed class JevModel : ILanguageModel
 
         ToolDescriptor gate = RequireGateTool(request);
 
-        JsonObject body = new()
-        {
-            ["model"]     = _options.Model,
-            ["state"]     = State(request),
-            ["questions"] = Questions()
-        };
+        Request evaluation = new();
+        evaluation.SetModel(_options.Model);
+        evaluation.SetState(State(request));
+        evaluation.SetQuestions(Questions());
 
         long started = Stopwatch.GetTimestamp();
 
-        using HttpResponseMessage response = await SendAsync(body, ct).ConfigureAwait(false);
+        Response response;
+
+        try
+        {
+            response = await EvaluateAsync(evaluation, ct).ConfigureAwait(false);
+        }
+        catch (JevApiException e)
+        {
+            throw new HttpRequestException(
+                $"{Descriptor} returned {(int)e.StatusCode}: {e.ResponseBody}", e, e.StatusCode);
+        }
 
         TimeSpan latency = Stopwatch.GetElapsedTime(started);
 
-        JsonElement root = await response.Content
-            .ReadFromJsonAsync<JsonElement>(ct).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException(
-                $"{Descriptor} returned {(int)response.StatusCode}: {root.GetRawText()}");
-
-        return new ModelResponse([Answer(root, gate.Name)], StopReason.ToolUse, UsageFrom(root, latency));
+        return new ModelResponse([Answer(response, gate.Name)], StopReason.ToolUse, UsageFrom(response, latency));
     }
 
     /// <summary>
@@ -185,29 +186,22 @@ public sealed class JevModel : ILanguageModel
         };
     }
 
-    private JsonObject Questions()
+    private Dictionary<string, Question> Questions()
     {
-        JsonArray levels = [.. _options.Profile.Enthusiasm.Levels.Select(l => (JsonNode)JsonValue.Create(l))];
+        Question enthusiasm = new();
+        enthusiasm.SetQuestionType(Question.QuestionType.Score);
+        enthusiasm.SetInstructions(_options.Profile.Enthusiasm.Instructions);
+        enthusiasm.SetCriteria(_options.Profile.Enthusiasm.Levels);
 
-        JsonObject faces = [];
+        Question emoticon = new();
+        emoticon.SetQuestionType(Question.QuestionType.Choice);
+        emoticon.SetInstructions(_options.Profile.Emoticon.Instructions);
+        emoticon.SetCriteria(_options.Profile.Emoticon.Faces);
 
-        foreach ((string face, string meaning) in _options.Profile.Emoticon.Faces)
-            faces[face] = meaning;
-
-        return new JsonObject
+        return new Dictionary<string, Question>
         {
-            [EnthusiasmQuestion] = new JsonObject
-            {
-                ["type"]         = "score",
-                ["instructions"] = _options.Profile.Enthusiasm.Instructions,
-                ["criteria"]     = levels
-            },
-            [EmoticonQuestion] = new JsonObject
-            {
-                ["type"]         = "choice",
-                ["instructions"] = _options.Profile.Emoticon.Instructions,
-                ["criteria"]     = faces
-            }
+            [EnthusiasmQuestion] = enthusiasm,
+            [EmoticonQuestion]   = emoticon
         };
     }
 
@@ -216,26 +210,24 @@ public sealed class JevModel : ILanguageModel
     /// mean over the level numbers, so dividing by the top level restores the 0–1 the policy
     /// compares against its threshold — continuous, not quantised to the bands.
     /// </summary>
-    private ToolUsePart Answer(JsonElement root, string toolName)
+    private ToolUsePart Answer(Response response, string toolName)
     {
-        if (!root.TryGetProperty("answers", out JsonElement answers))
-            throw new HttpRequestException($"{Descriptor} returned no answers: {root.GetRawText()}");
+        if (response.GetAnswers() is not { } answers)
+            throw new HttpRequestException($"{Descriptor} returned no answers: {response}");
+
+        ScoreAnswer?  scored = answers.GetValueOrDefault(EnthusiasmQuestion) as ScoreAnswer;
+        ChoiceAnswer? chosen = answers.GetValueOrDefault(EmoticonQuestion) as ChoiceAnswer;
 
         float enthusiasm = 0f;
 
-        if (answers.TryGetProperty(EnthusiasmQuestion, out JsonElement scored) &&
-            scored.TryGetProperty("score", out JsonElement score) &&
-            score.ValueKind == JsonValueKind.Number)
+        if (scored?.GetScore() is { } score)
         {
             int top = Math.Max(1, _options.Profile.Enthusiasm.Levels.Count - 1);
 
-            enthusiasm = Math.Clamp(score.GetSingle() / top, 0f, 1f);
+            enthusiasm = Math.Clamp((float)score / top, 0f, 1f);
         }
 
-        string emoticon = answers.TryGetProperty(EmoticonQuestion, out JsonElement chosen) &&
-                          chosen.TryGetProperty("choice", out JsonElement face)
-            ? face.GetString() ?? ""
-            : "";
+        string emoticon = chosen?.GetChoice() ?? "";
 
         LogConfidence(scored, chosen, enthusiasm, emoticon);
 
@@ -252,60 +244,65 @@ public sealed class JevModel : ILanguageModel
     /// <summary>Jev reports how spread its probabilities were, which nothing upstream has a field
     /// for. Logged rather than dropped: a gate that is confidently wrong and one that is guessing
     /// look identical in the response policy's own logs.</summary>
-    private void LogConfidence(JsonElement scored, JsonElement chosen, float enthusiasm, string emoticon)
+    private void LogConfidence(ScoreAnswer? scored, ChoiceAnswer? chosen, float enthusiasm, string emoticon)
     {
         if (!_log.IsEnabled(LogLevel.Debug)) return;
 
         _log.LogDebug(
             "Jev scored {Enthusiasm:0.00} (confidence {ScoreConfidence:0.00}) and chose {Emoticon} " +
             "(confidence {FaceConfidence:0.00})",
-            enthusiasm, Confidence(scored), emoticon, Confidence(chosen));
+            enthusiasm, scored?.GetConfidence() ?? double.NaN, emoticon, chosen?.GetConfidence() ?? double.NaN);
     }
 
-    private static float Confidence(JsonElement answer) =>
-        answer.ValueKind == JsonValueKind.Object &&
-        answer.TryGetProperty("confidence", out JsonElement value) &&
-        value.ValueKind == JsonValueKind.Number
-            ? value.GetSingle()
-            : float.NaN;
-
-    /// <summary>Backs off on the two statuses the API documents as retryable. Everything else is
-    /// returned as-is for the caller to turn into an exception.</summary>
-    private async Task<HttpResponseMessage> SendAsync(JsonObject body, CancellationToken ct)
+    /// <summary>Backs off on the two statuses the API documents as retryable. The SDK does not
+    /// surface Retry-After, so the wait is always exponential.</summary>
+    private async Task<Response> EvaluateAsync(Request request, CancellationToken ct)
     {
         for (int attempt = 0; ; attempt++)
         {
-            HttpResponseMessage response = await _http
-                .PostAsJsonAsync(_options.EvaluatePath.TrimStart('/'), body, ct).ConfigureAwait(false);
+            try
+            {
+                return await _client.EvaluateAsync(request).WaitAsync(ct).ConfigureAwait(false);
+            }
+            catch (JevApiException e) when (attempt < _options.MaxRetries &&
+                                            e.StatusCode is HttpStatusCode.TooManyRequests or Overloaded)
+            {
+                TimeSpan wait = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt) + Random.Shared.Next(250));
 
-            int status = (int)response.StatusCode;
+                _log.LogWarning("{Descriptor} returned {Status}; retrying in {Wait}",
+                    Descriptor, (int)e.StatusCode, wait);
 
-            if (attempt >= _options.MaxRetries ||
-                (status != (int)HttpStatusCode.TooManyRequests && status != Overloaded))
-                return response;
-
-            TimeSpan wait = response.Headers.RetryAfter?.Delta
-                            ?? TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt) + Random.Shared.Next(250));
-
-            response.Dispose();
-
-            _log.LogWarning("{Descriptor} returned {Status}; retrying in {Wait}", Descriptor, status, wait);
-
-            await Task.Delay(wait, ct).ConfigureAwait(false);
+                await Task.Delay(wait, ct).ConfigureAwait(false);
+            }
         }
     }
 
-    private TokenUsage UsageFrom(JsonElement root, TimeSpan latency)
+    private TokenUsage UsageFrom(Response response, TimeSpan latency)
     {
-        if (!root.TryGetProperty("usage", out JsonElement usage))
-            return new TokenUsage(0, 0, 0, 0, Descriptor.InstanceId, latency);
-
-        int Count(string name) =>
-            usage.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
-                ? value.GetInt32()
-                : 0;
+        Usage? usage = response.GetUsage();
 
         return new TokenUsage(
-            Count("input_tokens"), Count("output_tokens"), 0, 0, Descriptor.InstanceId, latency);
+            usage?.GetInputTokens() ?? 0, usage?.GetOutputTokens() ?? 0, 0, 0, Descriptor.InstanceId, latency);
+    }
+
+    /// <summary>
+    /// The SDK posts to the rooted "/v1/systemone", which discards the path of an endpoint such as
+    /// OpenRouter's "/api". This makes the path relative again and sends it through the configured client.
+    /// </summary>
+    private sealed class RelativePathHandler(HttpClient inner) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            HttpRequestMessage relative = new(
+                request.Method, new Uri(request.RequestUri!.PathAndQuery.TrimStart('/'), UriKind.Relative))
+            {
+                Content = request.Content
+            };
+
+            foreach ((string name, IEnumerable<string> values) in request.Headers)
+                relative.Headers.TryAddWithoutValidation(name, values);
+
+            return inner.SendAsync(relative, ct);
+        }
     }
 }

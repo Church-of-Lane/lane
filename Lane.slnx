@@ -9,6 +9,7 @@
     <Project Path="Lane.Surfaces.Discord/Lane.Surfaces.Discord.csproj" />
     <Project Path="Lane.Surfaces.Terminal/Lane.Surfaces.Terminal.csproj" />
     <Project Path="Lane.Surfaces.Api/Lane.Surfaces.Api.csproj" />
+    <Project Path="Lane.Surfaces.Coding/Lane.Surfaces.Coding.csproj" />
     <Project Path="Lane.Host/Lane.Host.csproj" />
     <Project Path="Lane.Nodes.Protocol/Lane.Nodes.Protocol.csproj" />
     <Project Path="Lane.Nodes/Lane.Nodes.csproj" />

@@ -190,6 +190,10 @@ public sealed class ToolRegistry : IToolRegistry
         if (descriptor.Availability.RequiresSession && scope.Session is null)
             return "requires a conversation";
 
+        if (descriptor.Availability.RequiredSessionTag is { } tag &&
+            scope.Session?.Tags.ContainsKey(tag) != true)
+            return $"only available in '{tag}' conversations";
+
         ChannelCapabilities required = descriptor.Availability.RequiredCapabilities;
 
         if (required != ChannelCapabilities.None)

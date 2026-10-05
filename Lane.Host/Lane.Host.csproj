@@ -25,6 +25,7 @@
     <ProjectReference Include="../Lane.Surfaces.Discord/Lane.Surfaces.Discord.csproj" />
     <ProjectReference Include="../Lane.Surfaces.Terminal/Lane.Surfaces.Terminal.csproj" />
     <ProjectReference Include="../Lane.Surfaces.Api/Lane.Surfaces.Api.csproj" />
+    <ProjectReference Include="../Lane.Surfaces.Coding/Lane.Surfaces.Coding.csproj" />
     <ProjectReference Include="../Lane.Nodes/Lane.Nodes.csproj" />
   </ItemGroup>
 

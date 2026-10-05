@@ -324,6 +324,7 @@ User=$(id -un)
 WorkingDirectory=$TARGET
 ExecStart=$TARGET/lane --no-tui
 Restart=on-failure
+RestartForceExitStatus=75
 RestartSec=5
 KillSignal=SIGINT
 

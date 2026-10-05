@@ -6,6 +6,8 @@ using Lane.Core.Energy;
 using Lane.Core.Events;
 using Lane.Core.Forum;
 using Lane.Core.Identity;
+using Lane.Core.Kernel;
+using Lane.Core.Lifecycle;
 using Lane.Core.Memory;
 using Lane.Core.Messages;
 using Lane.Core.Models;
@@ -17,6 +19,7 @@ using Lane.Core.Sessions;
 using Lane.Core.Tools;
 using Lane.Core.Surfaces;
 using Lane.Host.Configuration;
+using Lane.Host.Lifecycle;
 using Lane.Host.Logging;
 using Lane.Host.Presence;
 using Lane.Host.Web;
@@ -32,6 +35,7 @@ using Lane.Providers.Anthropic;
 using Lane.Providers.OpenAi;
 using Lane.Providers.TypeSafe;
 using Lane.Surfaces.Api;
+using Lane.Surfaces.Coding;
 using Lane.Surfaces.Discord;
 using Lane.Surfaces.Terminal;
 using Microsoft.Extensions.Configuration;
@@ -51,8 +55,9 @@ public static class LaneHostBuilderExtensions
     /// host reads instance arrays and constructs each one through a keyed factory, so
     /// adding a second Discord bot is a config entry rather than a code change.
     /// </summary>
+    /// <param name="restart">What the startup check found; null when it was not run.</param>
     public static IHostApplicationBuilder AddLane(
-        this IHostApplicationBuilder builder, BufferedLogSink logs, bool runDashboard = true)
+        this IHostApplicationBuilder builder, BufferedLogSink logs, bool runDashboard = true, RestartStartup? restart = null)
     {
         IConfigurationSection section = builder.Configuration.GetSection(LaneOptions.SectionName);
 
@@ -80,6 +85,8 @@ public static class LaneHostBuilderExtensions
         RegisterRecording(builder.Services, section.GetSection("Recording"));
         RegisterModels(builder.Services, section.GetSection("Models"));
         RegisterSurfaces(builder.Services, section.GetSection("Surfaces"));
+        RegisterRestart(builder.Services, section.GetSection("Restart"), restart);
+        RegisterCoding(builder.Services, section.GetSection("Coding"));
 
         if (runDashboard) RegisterWebDashboard(builder.Services, section.GetSection("Dashboard"), logs);
 
@@ -105,9 +112,64 @@ public static class LaneHostBuilderExtensions
             sp.GetRequiredService<IMonologueScheduler>(),
             sp.GetRequiredService<IEnergyService>(),
             sp.GetRequiredService<IOptions<DashboardOptions>>(),
-            sp.GetRequiredService<IHostApplicationLifetime>(),
+            sp.GetRequiredService<IRestartCoordinator>(),
+            sp.GetRequiredService<IAgentKernel>(),
+            sp.GetRequiredService<ITranscriptStore>(),
+            sp.GetRequiredService<IIdentityResolver>(),
             sp.GetRequiredService<ILogger<WebDashboardServer>>(),
-            sp.GetService<NodePortal>()));
+            sp.GetService<NodePortal>(),
+            sp.GetService<ICodingWorkspaces>()));
+    }
+
+    private static void RegisterRestart(IServiceCollection services, IConfigurationSection section, RestartStartup? startup)
+    {
+        RestartOptions options = new();
+        section.Bind(options);
+
+        services.AddSingleton(options);
+        services.AddSingleton<IProcessRunner>(ProcessRunner.Instance);
+
+        services.AddSingleton(sp => new SelfUpdater(
+            options,
+            startup ?? new RestartStartup(null, ExitNow: false),
+            AppContext.BaseDirectory,
+            sp.GetRequiredService<IHostApplicationLifetime>(),
+            sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<ILogger<SelfUpdater>>()));
+        services.AddSingleton<IRestartCoordinator>(sp => sp.GetRequiredService<SelfUpdater>());
+        services.AddHostedService(sp => sp.GetRequiredService<SelfUpdater>());
+    }
+
+    /// <summary>
+    /// Reads the coding section. An omitted rule list takes its default and an empty one stays
+    /// empty. Token references are resolved.
+    /// </summary>
+    internal static CodingOptions ReadCodingOptions(IConfigurationSection section)
+    {
+        CodingOptions options = new();
+        section.Bind(options);
+
+        if (!section.GetSection("AutoAllow").Exists())       options.AutoAllow       = [.. CodingOptions.DefaultAutoAllow];
+        if (!section.GetSection("AlwaysDeny").Exists())      options.AlwaysDeny      = [.. CodingOptions.DefaultAlwaysDeny];
+        if (!section.GetSection("PassEnvironment").Exists()) options.PassEnvironment = [.. CodingOptions.DefaultPassEnvironment];
+
+        SecretResolver secrets = new();
+
+        options.GitHubToken = secrets.Resolve(options.GitHubTokenRef);
+
+        foreach (CodingWorkspaceOptions workspace in options.Workspaces)
+            workspace.GitHubToken = secrets.Resolve(workspace.GitHubTokenRef);
+
+        return options;
+    }
+
+    private static void RegisterCoding(IServiceCollection services, IConfigurationSection section)
+    {
+        CodingOptions options = ReadCodingOptions(section);
+
+        if (!options.Enabled) return;
+
+        services.AddLaneCoding(options);
     }
 
     /// <summary>

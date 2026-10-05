@@ -2,6 +2,7 @@ using Lane.Core.Identity;
 using Lane.Core.Memory;
 using Lane.Host;
 using Lane.Host.Configuration;
+using Lane.Host.Lifecycle;
 using Lane.Host.Logging;
 using Lane.Host.Migration;
 using Lane.Host.Voice;
@@ -42,7 +43,24 @@ builder.Logging.AddProvider(new BufferedLoggerProvider(logs));
 // conversation on stdout stays clean.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-builder.AddLane(logs, runDashboard: !migrating);
+RestartStartup? restart = null;
+
+if (!migrating)
+{
+    RestartOptions restartOptions = new();
+    builder.Configuration.GetSection(RestartOptions.SectionName).Bind(restartOptions);
+
+    restart = SelfUpdater.CheckOnStartup(AppContext.BaseDirectory, restartOptions, Console.Error);
+
+    // The previous build has just been put back, and this process is still the failed one.
+    if (restart.ExitNow)
+    {
+        Environment.ExitCode = restartOptions.ExitCode;
+        return;
+    }
+}
+
+builder.AddLane(logs, runDashboard: !migrating, restart);
 
 builder.Services.AddSingleton<V2Migrator>();
 

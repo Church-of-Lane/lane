@@ -236,6 +236,38 @@ public sealed class ToolGatingTests
     }
 
     [Fact]
+    public async Task Session_tag_tools_are_only_offered_where_the_tag_is_even_with_a_stable_set()
+    {
+        ToolRegistry registry = Registry(
+            new ToolOptions { PreferStableSet = true },
+            new Stub("web_search"),
+            new Stub("git", new ToolAvailability { RequiredSessionTag = "workspace" }));
+
+        SessionDescriptor plain  = Descriptor();
+        SessionDescriptor tagged = Descriptor() with
+        {
+            Tags = new Dictionary<string, string> { ["workspace"] = "self" }
+        };
+
+        ToolSet onPlain  = await registry.ResolveAsync(new ToolScope(plain, TurnKind.Respond), default);
+        ToolSet onTagged = await registry.ResolveAsync(new ToolScope(tagged, TurnKind.Respond), default);
+
+        Assert.Equal(["web_search"], onPlain.Descriptors.Select(d => d.Name));
+        Assert.Equal(["git", "web_search"], onTagged.Descriptors.Select(d => d.Name));
+
+        ToolResult refused = await registry.InvokeAsync(
+            "git", "c1", JsonSerializer.SerializeToElement(new { }),
+            new ToolContext
+            {
+                Turn = TurnKind.Respond, Descriptor = plain,
+                Services = new ServiceCollection().BuildServiceProvider()
+            }, default);
+
+        Assert.True(refused.IsError);
+        Assert.Contains("workspace", refused.Text);
+    }
+
+    [Fact]
     public async Task The_fingerprint_tracks_the_advertised_set()
     {
         // Requests carry it so a change that quietly invalidates the prompt cache shows up

@@ -21,6 +21,12 @@ public sealed record ToolAvailability
 
     public IReadOnlyList<string> Tags { get; init; } = [];
 
+    /// <summary>
+    /// Only offered in sessions whose <see cref="SessionDescriptor.Tags"/> contain this key.
+    /// Filtered when advertising, even under a stable set.
+    /// </summary>
+    public string? RequiredSessionTag { get; init; }
+
     public static ToolAvailability Anywhere { get; } = new();
 }
 

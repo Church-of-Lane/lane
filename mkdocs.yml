@@ -12,6 +12,7 @@ nav:
   - HTTP API: api.md
   - Nodes: nodes.md
   - Identities: identities.md
+  - Coding: coding.md
   - Discord:
       - Terms of Service: discord_tos.md
       - Privacy Policy: discord_privacy_policy.md

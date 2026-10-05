@@ -1,15 +1,20 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using Lane.Core.Energy;
 using Lane.Core.Events;
+using Lane.Core.Identity;
+using Lane.Core.Kernel;
+using Lane.Core.Lifecycle;
+using Lane.Core.Memory;
+using Lane.Core.Messages;
 using Lane.Core.Models;
 using Lane.Core.Monologue;
 using Lane.Core.Sessions;
 using Lane.Host.Logging;
 using Lane.Nodes.Portal;
+using Lane.Surfaces.Coding;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -33,6 +38,12 @@ public sealed class DashboardOptions
 
     /// <summary>The file the config editor reads and writes. Defaults beside the executable.</summary>
     public string ConfigPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+    /// <summary>
+    /// The name messages posted from the dashboard carry. They come from the account
+    /// <c>dashboard:owner</c>, which the identity map can link to a person.
+    /// </summary>
+    public string OwnerName { get; set; } = "owner";
 }
 
 /// <summary>
@@ -53,15 +64,21 @@ public sealed class WebDashboardServer(
     IMonologueScheduler monologue,
     IEnergyService energy,
     IOptions<DashboardOptions> options,
-    IHostApplicationLifetime lifetime,
+    IRestartCoordinator restart,
+    IAgentKernel kernel,
+    ITranscriptStore transcript,
+    IIdentityResolver identity,
     ILogger<WebDashboardServer> log,
-    NodePortal? portal = null) : BackgroundService
+    NodePortal? portal = null,
+    ICodingWorkspaces? coding = null) : BackgroundService
 {
     private readonly DashboardOptions _options = options.Value;
     private readonly ConcurrentDictionary<string, string> _sessionNotes = new();
     private readonly ConcurrentDictionary<string, ModelUsage> _usage = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    public static readonly SurfaceId Surface = new("dashboard");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -149,7 +166,15 @@ public sealed class WebDashboardServer(
 
                 case "/api/restart" when method == "POST":
                     await WriteJsonAsync(context, new { restarting = true }, ct).ConfigureAwait(false);
-                    Restart();
+                    restart.Restart("requested from the dashboard");
+                    break;
+
+                case "/api/session/messages" when method == "GET":
+                    await GetMessagesAsync(context, ct).ConfigureAwait(false);
+                    break;
+
+                case "/api/session/messages" when method == "POST":
+                    await PostMessageAsync(context, ct).ConfigureAwait(false);
                     break;
 
                 case "/config":
@@ -258,56 +283,72 @@ public sealed class WebDashboardServer(
         await WriteJsonAsync(context, new { saved = true }, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Config changes only take effect at startup — nothing here re-runs the composition
-    /// root — so "reload" means relaunching the whole process. Relaunched with the same
-    /// executable and arguments it was started with, then this instance shuts down; whatever
-    /// started it (a shell, a service manager) sees an ordinary exit and the new process
-    /// take its place.
-    /// </summary>
-    private void Restart()
+    private bool TryReadSession(HttpListenerContext context, out SessionId? id) =>
+        SessionId.TryParse(context.Request.QueryString["id"], out id) && sessions.TryGet(id, out _);
+
+    private async Task GetMessagesAsync(HttpListenerContext context, CancellationToken ct)
     {
-        _ = Task.Run(async () =>
+        if (!TryReadSession(context, out SessionId? id))
         {
-            // Long enough for the response above to reach the browser before the listener
-            // that would carry it goes away.
-            await Task.Delay(TimeSpan.FromMilliseconds(300)).ConfigureAwait(false);
+            context.Response.StatusCode = 404;
+            await WriteJsonAsync(context, new { error = "No such open session." }, ct).ConfigureAwait(false);
+            return;
+        }
 
-            try
-            {
-                string? exe = Environment.ProcessPath;
+        int limit = int.TryParse(context.Request.QueryString["limit"], out int n) ? Math.Clamp(n, 1, 500) : 100;
 
-                if (!string.IsNullOrEmpty(exe))
-                {
-                    string[] cliArgs = Environment.GetCommandLineArgs();
+        IReadOnlyList<LaneMessage> messages = await transcript
+            .ReadAsync(new TranscriptQuery { Session = id, Limit = limit, Descending = true }, ct)
+            .ConfigureAwait(false);
 
-                    // Framework-dependent runs start as "dotnet lane.dll ...", where
-                    // ProcessPath is dotnet itself and the dll is the first command-line
-                    // argument; a published apphost's ProcessPath already is the same
-                    // binary, so command-line argument zero is dropped instead.
-                    bool viaDotnet = string.Equals(
-                        Path.GetFileNameWithoutExtension(exe), "dotnet", StringComparison.OrdinalIgnoreCase);
+        MessageRow[] rows = [.. messages
+            .Where(m => m.Role != LaneRole.Tool && m.TextContent.Length > 0)
+            .OrderBy(m => m.Sequence)
+            .Select(m => new MessageRow(m.Sequence, m.Author.DisplayName, m.Author.IsLane, m.Kind.ToString(), m.TextContent, m.Timestamp))];
 
-                    ProcessStartInfo psi = new(exe) { UseShellExecute = false, WorkingDirectory = Environment.CurrentDirectory };
+        await WriteJsonAsync(context, rows, ct).ConfigureAwait(false);
+    }
 
-                    foreach (string arg in viaDotnet ? cliArgs : cliArgs.Skip(1)) psi.ArgumentList.Add(arg);
+    private async Task PostMessageAsync(HttpListenerContext context, CancellationToken ct)
+    {
+        if (!TryReadSession(context, out SessionId? id))
+        {
+            context.Response.StatusCode = 404;
+            await WriteJsonAsync(context, new { error = "No such open session." }, ct).ConfigureAwait(false);
+            return;
+        }
 
-                    Process.Start(psi);
-                }
-                else
-                {
-                    log.LogWarning("Could not determine the current executable; not relaunching after restart");
-                }
-            }
-            catch (Exception ex)
-            {
-                log.LogError(ex, "Failed to relaunch after a dashboard restart request");
-            }
-            finally
-            {
-                lifetime.StopApplication();
-            }
-        });
+        string? text;
+
+        try
+        {
+            using JsonDocument body = await JsonDocument.ParseAsync(context.Request.InputStream, cancellationToken: ct).ConfigureAwait(false);
+            text = body.RootElement.TryGetProperty("text", out JsonElement t) ? t.GetString()?.Trim() : null;
+        }
+        catch (JsonException)
+        {
+            text = null;
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            context.Response.StatusCode = 400;
+            await WriteJsonAsync(context, new { error = "Send {\"text\": \"…\"}." }, ct).ConfigureAwait(false);
+            return;
+        }
+
+        Participant author = identity.Resolve(new ParticipantId(Surface, "owner"), _options.OwnerName);
+
+        coding?.NoteHumanActivity(id!);
+
+        await kernel.SubmitAsync(new InboundEvent
+        {
+            Session = id!,
+            Author  = author,
+            Message = LaneMessage.User(id!, author, text, DateTimeOffset.UtcNow)
+        }, ct).ConfigureAwait(false);
+
+        await WriteJsonAsync(context, new { sent = true }, ct).ConfigureAwait(false);
     }
 
     private void RecordUsage(TokenUsageEvent evt)
@@ -354,7 +395,22 @@ public sealed class WebDashboardServer(
 
         string[] logLines = [.. logs.Snapshot().TakeLast(300).Select(e => e.Short)];
 
-        return new DashboardSnapshot(sessionRows, modelRows, energySnapshot, monologueSnapshot, logLines);
+        return new DashboardSnapshot(sessionRows, modelRows, energySnapshot, monologueSnapshot, logLines, BuildCoding());
+    }
+
+    private CodingRow[] BuildCoding()
+    {
+        if (coding is null) return [];
+
+        return [.. coding.All.Select(w => new CodingRow(
+            w.SessionId.Value,
+            w.Name,
+            w.Path,
+            w.SelfHosted,
+            w.Claude.Busy ? "working" : w.Claude.Running ? "idle" : "not started",
+            w.Claude.TotalCostUsd,
+            w.Surface?.Paused == true,
+            [.. coding.PendingPermissions(w.Id).Select(r => $"{r.Id}: {r.ToolName}")]))];
     }
 
     private sealed class ModelUsage(string instance, string roles)
@@ -410,4 +466,11 @@ public sealed record DashboardSnapshot(
     IReadOnlyList<ModelRow> Models,
     EnergySnapshot Energy,
     MonologueSnapshot Monologue,
-    IReadOnlyList<string> Logs);
+    IReadOnlyList<string> Logs,
+    IReadOnlyList<CodingRow> Coding);
+
+public sealed record MessageRow(long Sequence, string Author, bool IsLane, string Kind, string Text, DateTimeOffset Timestamp);
+
+public sealed record CodingRow(
+    string Session, string Name, string Path, bool SelfHosted, string Claude, decimal CostUsd, bool Paused,
+    IReadOnlyList<string> PendingPermissions);

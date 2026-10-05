@@ -33,6 +33,7 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 - **Identities** — one person across Discord, the terminal and the API, linked by configuration or by a proven code, never guessed from a matching name. She can be asked to call you something else, and can recognise you by voice
 - **Tools** — web search, page fetching, book reading, a scratchpad she writes on purpose, saved images, per-conversation descriptions, voice-channel control, emoticons, Discord reactions, and backing out of a reply the router let through. A new ability is one class
 - **MCP** — configured servers contribute their tools, namespaced and sanitised, retried when down, kept out of the unattended monologue unless a server opts in
+- **Coding** — she works with Claude Code in a conversation of its own: steering it, answering its permission requests, committing and pushing with git, and reading GitHub issues. She can start new projects from her monologue, and rebuild and restart herself from her own source, but only when it builds
 - **Nodes** — other people can lend Lane a model over a WebSocket, earn credits for answering, and spend them to sponsor where she listens
 - **Voice** — streaming TTS through ElevenLabs or local [flite](https://github.com/festvox/flite), Azure STT, barge-in and a per-session floor. She walks into a voice channel when asked rather than at startup
 - **Image understanding** — she can see and interpret images shared with her
@@ -54,8 +55,9 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 | `Lane.Audio` | Resampling, continuous recognition, streaming synthesis, the audio router and the voice floor |
 | `Lane.Tools`, `Lane.Tools.Mcp` | The built-in abilities, and the MCP client |
 | `Lane.Surfaces.Discord`, `.Terminal`, `.Api` | The transports |
+| `Lane.Surfaces.Coding` | Conversations with Claude Code, the permission server it asks through, git and GitHub |
 | `Lane.Nodes`, `Lane.Nodes.Protocol`, `Lane.Node.Sdk` | The node listener, credits and portal; the wire protocol; the SDK for writing a node |
-| `Lane.Host` | Composition root, configuration, secrets, prompt templates, web dashboard and face |
+| `Lane.Host` | Composition root, configuration, secrets, prompt templates, web dashboard, face, and self-update |
 | `Lane.Testing`, `Lane.Tests` | An offline harness, and xUnit tests that need no network |
 | `Deploy` | `collect.sh` / `install.sh` for moving an instance to another machine |
 
@@ -94,6 +96,7 @@ AZURE_KEY=           # Required for STT
 AZURE_REGION=        # Required for STT
 ELEVENLABS_KEY=      # Required for TTS unless using flite
 LANE_IOS_KEY=        # One per API client app
+GITHUB_TOKEN=        # Optional: pushing and reading issues from coding surfaces
 ```
 
 A surface whose token is missing logs and is skipped; the rest still run.
@@ -120,5 +123,6 @@ Moving an instance to another machine is `./Deploy/collect.sh` on the old one an
 - [HTTP API](Docs/api.md) — sessions, streamed replies, the event feed and the voice socket
 - [Nodes](Docs/nodes.md) — lending Lane a model, credits and sponsorship
 - [Identities](Docs/identities.md) — how she decides who is speaking
+- [Coding](Docs/coding.md) — working with Claude Code, git and GitHub, and restarting herself
 - [Lane.md](Lane.md) — the design of v3, and why each part is shaped the way it is
 - [v2 docs](Docs/v2/index.md) — the single-surface bot that came before the rewrite, kept for reference

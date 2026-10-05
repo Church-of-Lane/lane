@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Lane.Tools.Replies;
 using System.Text.Json;
+using Lane.Core.Events;
 using Lane.Core.Memory;
 using Lane.Core.Messages;
 using Lane.Core.Models;
@@ -116,8 +117,13 @@ public sealed class ToolPipelineTests
 
         RecordingChannel channel = harness.OpenSession("terminal", "local", memoryGroup: "terminal/local");
 
+        // The reply streams to the channel before the turn is persisted.
+        TaskCompletionSource finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using IDisposable _ = harness.Services.GetRequiredService<IEventBus>()
+            .Subscribe<TurnCompleted>(evt => { if (evt.Session == channel.Id) finished.TrySetResult(); });
+
         await harness.SendAsync(channel, "jahan", "look something up");
-        await channel.WaitForAsync(1, Timeout);
+        await finished.Task.WaitAsync(Timeout);
 
         IReadOnlyList<LaneMessage> logged = await harness.Services
             .GetRequiredService<ITranscriptStore>()

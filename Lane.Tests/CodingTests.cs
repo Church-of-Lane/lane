@@ -7,13 +7,16 @@ using Lane.Core.Identity;
 using Lane.Core.Kernel;
 using Lane.Core.Lifecycle;
 using Lane.Core.Memory;
+using Lane.Core.Models;
 using Lane.Core.Sessions;
+using Lane.Core.Tools;
 using Lane.Host;
 using Lane.Memory.Sqlite;
 using Lane.Surfaces.Coding;
 using Lane.Surfaces.Coding.Claude;
 using Lane.Surfaces.Coding.Git;
 using Lane.Surfaces.Coding.Permissions;
+using Lane.Surfaces.Coding.Tools;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,7 +37,7 @@ public sealed class StreamJsonTests
         """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/w/x"}}]},"parent_tool_use_id":"toolu_1","session_id":"s"}""";
 
     private const string Success =
-        """{"type":"result","subtype":"success","is_error":false,"result":"PONG","total_cost_usd":0.058815,"terminal_reason":"completed","queued_turn_count":0,"session_id":"s"}""";
+        """{"type":"result","subtype":"success","is_error":false,"result":"PONG","total_cost_usd":0.058815,"terminal_reason":"completed","queued_turn_count":0,"session_id":"s","duration_ms":3371,"usage":{"input_tokens":10,"cache_creation_input_tokens":28803,"cache_read_input_tokens":120,"output_tokens":47}}""";
 
     private const string Interrupted =
         """{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0.000974,"terminal_reason":"aborted_streaming","queued_turn_count":0,"session_id":"s"}""";
@@ -70,6 +73,7 @@ public sealed class StreamJsonTests
         Assert.Equal("PONG", result.Text);
         Assert.Equal(0.058815m, result.TotalCostUsd);
         Assert.Equal(0, result.QueuedTurns);
+        Assert.Equal(new TokenUsage(10, 47, 120, 28803, "claude-code", TimeSpan.FromMilliseconds(3371)), result.Usage);
 
         ClaudeEvent.Result interrupted = Assert.IsType<ClaudeEvent.Result>(Assert.Single(StreamJson.Parse(Interrupted)));
 
@@ -172,6 +176,19 @@ public sealed class PermissionBrokerTests
 
 public sealed class CodingSurfaceTests
 {
+    internal sealed class RecordingClaude : IClaudeCodeTransport
+    {
+        public bool Busy => false;
+        public bool Running => false;
+        public string? SessionId => null;
+        public decimal TotalCostUsd => 0;
+        public event Action<ClaudeTurn>? TurnCompleted { add { } remove { } }
+        public Task SendAsync(string text, CancellationToken ct) => Task.CompletedTask;
+        public Task<bool> InterruptAsync(CancellationToken ct) => Task.FromResult(false);
+        public Task ResetAsync(CancellationToken ct) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class FakeClaude : IClaudeCodeTransport
     {
         public List<string> Sent { get; } = [];
@@ -181,8 +198,8 @@ public sealed class CodingSurfaceTests
         public decimal TotalCostUsd => 0;
         public event Action<ClaudeTurn>? TurnCompleted;
 
-        public void Reply(string text) =>
-            TurnCompleted?.Invoke(new ClaudeTurn(text, false, "completed", 0.25m, ["ran `dotnet build`"]));
+        public void Reply(string text, TokenUsage usage = default) =>
+            TurnCompleted?.Invoke(new ClaudeTurn(text, false, "completed", 0.25m, ["ran `dotnet build`"], usage));
 
         public Exception? Failure { get; set; }
 
@@ -200,6 +217,7 @@ public sealed class CodingSurfaceTests
     internal sealed class RecordingKernel : IAgentKernel
     {
         public List<InboundEvent> Submitted { get; } = [];
+        public List<(SessionId Session, SessionWorkItem Item)> Posted { get; } = [];
 
         public ValueTask SubmitAsync(InboundEvent evt, CancellationToken ct = default)
         {
@@ -207,7 +225,12 @@ public sealed class CodingSurfaceTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask PostAsync(SessionId session, SessionWorkItem item, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask PostAsync(SessionId session, SessionWorkItem item, CancellationToken ct = default)
+        {
+            lock (Posted) Posted.Add((session, item));
+            return ValueTask.CompletedTask;
+        }
+
         public ValueTask<bool> CancelTurnAsync(SessionId session, string reason) => ValueTask.FromResult(false);
     }
 
@@ -345,6 +368,26 @@ public sealed class CodingSurfaceTests
     }
 
     [Fact]
+    public async Task Claude_codes_tokens_are_reported_so_energy_pays_for_them()
+    {
+        Rig rig = await StartAsync();
+
+        List<TokenUsageEvent> reported = [];
+        using IDisposable _ = rig.Bus.Subscribe<TokenUsageEvent>(reported.Add);
+
+        TokenUsage usage = new(10, 47, 28_000, 300, "claude-code", TimeSpan.FromSeconds(3));
+
+        rig.Claude.Reply("Done.", usage);
+        rig.Claude.Reply("Interrupted, so nothing was spent.");
+
+        TokenUsageEvent evt = Assert.Single(reported);
+
+        Assert.Equal("claude-code", evt.ModelInstanceId);
+        Assert.Equal("coding", evt.Role);
+        Assert.Equal(usage, evt.Usage);
+    }
+
+    [Fact]
     public async Task Too_many_unattended_exchanges_hold_the_reply_until_someone_speaks()
     {
         Rig rig = await StartAsync(maxUnattended: 2);
@@ -448,14 +491,17 @@ public sealed class CodingWorkspaceManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Opening_a_project_makes_a_repository_that_is_reopened_after_a_restart_until_closed()
+    public async Task A_project_is_created_once_survives_a_restart_and_reopens_by_name_after_closing()
     {
         CancellationToken ct = TestContext.Current.CancellationToken;
         CodingOptions options = new() { WorkspacesRoot = _root, GitAuthor = "Lane <lane@example.com>" };
 
         await using CodingWorkspaceManager first = Manager(options);
 
-        CodingWorkspace opened = await first.OpenAsync("A Tiny Game", "A game about tiny things.", "jahan/tiny-game", ct);
+        CodingWorkspaceOpening opening = await first.OpenAsync("A Tiny Game", "A game about tiny things.", "jahan/tiny-game", ct);
+        CodingWorkspace opened = opening.Workspace;
+
+        Assert.Equal(OpeningOutcome.Created, opening.Outcome);
 
         Assert.Equal("a-tiny-game", opened.Id);
         Assert.Equal(Path.Combine(_root, "a-tiny-game"), opened.Path);
@@ -465,6 +511,10 @@ public sealed class CodingWorkspaceManagerTests : IDisposable
         ProcessResult log = await opened.Git.RunAsync(ct, "log", "--format=%an %s");
         Assert.Equal("Lane Start A Tiny Game", log.Output.Trim());
         Assert.Equal("https://github.com/jahan/tiny-game.git", await opened.Git.OriginAsync(ct));
+
+        CodingWorkspaceOpening again = await first.OpenAsync("a tiny game", "Something else.", null, ct);
+        Assert.Equal(OpeningOutcome.AlreadyOpen, again.Outcome);
+        Assert.Same(opened, again.Workspace);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             Manager(options).OpenAsync("x", "y", "not a repo", ct));
@@ -484,6 +534,24 @@ public sealed class CodingWorkspaceManagerTests : IDisposable
         await third.StartAsync(ct);
 
         Assert.Null(third.Find("a-tiny-game"));
+
+        CodingWorkspaceOpening back = await third.OpenAsync("A Tiny Game", "A game about tiny things.", null, ct);
+
+        Assert.Equal(OpeningOutcome.Reopened, back.Outcome);
+        Assert.Equal("Lane Start A Tiny Game", (await back.Workspace.Git.RunAsync(ct, "log", "--format=%an %s")).Output.Trim());
+    }
+
+    [Fact]
+    public async Task A_non_empty_directory_that_is_not_a_repository_is_left_alone()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+
+        Directory.CreateDirectory(Path.Combine(_root, "notes"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "notes", "todo.txt"), "mine", ct);
+
+        await using CodingWorkspaceManager manager = Manager(new CodingOptions { WorkspacesRoot = _root });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.OpenAsync("Notes", "x", null, ct));
     }
 
     [Fact]
@@ -508,6 +576,110 @@ public sealed class CodingWorkspaceManagerTests : IDisposable
         Assert.Equal(["self"], manager.All.Select(w => w.Id));
         Assert.True(manager.TryGet(new SurfaceId("coding.self"), out _));
         await Assert.ThrowsAsync<InvalidOperationException>(() => manager.CloseAsync("self", ct));
+    }
+}
+
+public sealed class OpenCodingSurfaceToolTests
+{
+    private sealed class FakeWorkspaces : ICodingWorkspaces
+    {
+        public List<string> Opened { get; } = [];
+
+        public IReadOnlyCollection<CodingWorkspace> All => [];
+        public bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace) { workspace = null; return false; }
+        public CodingWorkspace? Find(string id) => null;
+        public Task<bool> CloseAsync(string id, CancellationToken ct) => Task.FromResult(true);
+        public void NoteHumanActivity(SessionId session) { }
+        public IReadOnlyList<PermissionRequest> PendingPermissions(string id) => [];
+
+        public Task<CodingWorkspaceOpening> OpenAsync(string name, string purpose, string? gitHubRepo, CancellationToken ct)
+        {
+            Opened.Add(name);
+
+            CodingWorkspace workspace = new()
+            {
+                Id = "game", Name = name, Path = "/w/game",
+                Claude = new CodingSurfaceTests.RecordingClaude(), Git = new GitRunner("/w/game", "Lane", null)
+            };
+
+            return Task.FromResult(new CodingWorkspaceOpening(workspace, OpeningOutcome.Created));
+        }
+    }
+
+    private static readonly SurfaceId Discord = new("discord.main");
+
+    private static (ITool Tool, ToolContext Context, FakeWorkspaces Workspaces, CodingSurfaceTests.RecordingKernel Kernel) Build(
+        TurnKind turn, string? requester, params string[] openers)
+    {
+        FakeWorkspaces workspaces = new();
+        CodingSurfaceTests.RecordingKernel kernel = new();
+
+        ServiceProvider services = new ServiceCollection()
+            .AddSingleton<ICodingWorkspaces>(workspaces)
+            .AddSingleton<IAgentKernel>(kernel)
+            .AddSingleton(new CodingOptions { Openers = [.. openers] })
+            .BuildServiceProvider();
+
+        ToolContext context = new()
+        {
+            Turn      = turn,
+            Services  = services,
+            Requester = requester is null ? null : new Participant(new ParticipantId(Discord, "1"), requester, requester)
+        };
+
+        return (new OpenCodingSurfaceTool(), context, workspaces, kernel);
+    }
+
+    private static ValueTask<ToolResult> Invoke(ITool tool, ToolContext context, object args) =>
+        tool.InvokeAsync(new ToolInvocation("c1", JsonSerializer.SerializeToElement(args), context), TestContext.Current.CancellationToken);
+
+    [Fact]
+    public void It_is_offered_in_replies_as_well_as_the_monologue()
+    {
+        TurnKind allowed = new OpenCodingSurfaceTool().Descriptor.Availability.AllowedTurns;
+
+        Assert.True(allowed.HasFlag(TurnKind.Respond));
+        Assert.True(allowed.HasFlag(TurnKind.Monologue));
+    }
+
+    [Fact]
+    public async Task In_a_reply_only_listed_openers_can_have_a_project_opened()
+    {
+        (ITool tool, ToolContext context, FakeWorkspaces workspaces, _) = Build(TurnKind.Respond, "stranger", "jahan");
+
+        ToolResult result = await Invoke(tool, context, new { name = "Game", purpose = "fun" });
+
+        Assert.True(result.IsError);
+        Assert.Contains("Openers", result.Text);
+        Assert.Empty(workspaces.Opened);
+    }
+
+    [Fact]
+    public async Task An_opener_gets_the_project_and_the_brief_is_sent_to_claude_code()
+    {
+        (ITool tool, ToolContext context, FakeWorkspaces workspaces, CodingSurfaceTests.RecordingKernel kernel) =
+            Build(TurnKind.Respond, "jahan", "jahan");
+
+        ToolResult result = await Invoke(tool, context, new { name = "Game", purpose = "fun", brief = "Make a snake game." });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Equal(["Game"], workspaces.Opened);
+
+        (SessionId session, SessionWorkItem item) = Assert.Single(kernel.Posted);
+
+        Assert.Equal("coding.game/Text/claude", session.Value);
+        Assert.Equal("Make a snake game.", Assert.IsType<SessionWorkItem.Speak>(item).Text);
+    }
+
+    [Fact]
+    public async Task The_monologue_needs_no_permission()
+    {
+        (ITool tool, ToolContext context, FakeWorkspaces workspaces, _) = Build(TurnKind.Monologue, requester: null);
+
+        ToolResult result = await Invoke(tool, context, new { name = "Game", purpose = "fun" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Equal(["Game"], workspaces.Opened);
     }
 }
 

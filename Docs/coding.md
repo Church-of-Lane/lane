@@ -8,8 +8,9 @@ Coding surfaces come from two places:
 
 - **Configured workspaces** in `Lane:Coding:Workspaces`. One of them can be Lane's own source, which lets her rebuild
   and restart herself.
-- **Projects Lane opens herself** from her monologue, with `open_coding_surface`. Each one is a new directory and git
-  repository under `WorkspacesRoot`. They are remembered across restarts until she closes them.
+- **Projects Lane opens herself**, with `open_coding_surface`, from her monologue or when someone listed in `Openers`
+  asks her to. Each one is a directory and git repository under `WorkspacesRoot`, named after the project. They are
+  remembered across restarts until she closes them, and opening a closed project by name brings it back.
 
 ---
 
@@ -39,6 +40,7 @@ Coding is off until `Lane:Coding:Enabled` is true.
   "AutoAllow": ["Read", "Glob", "Grep", "Edit", "Write", "Bash(dotnet build *)", "Bash(dotnet test *)"],
   "AlwaysDeny": ["Bash(git push *)", "Bash(rm -rf *)", "Bash(sudo *)"],
   "PassEnvironment": ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+  "Openers": ["jahan"],
   "Workspaces": [
     { "Id": "self", "Name": "Lane", "Path": "~/src/lane", "Purpose": "Lane's own source code.", "SelfHosted": true }
   ]
@@ -53,6 +55,7 @@ Coding is off until `Lane:Coding:Enabled` is true.
 | `MaxBudgetUsd` | Passed to Claude Code as `--max-budget-usd`, per process. `0` means no cap. |
 | `MaxUnattendedExchanges` | How many Claude Code replies Lane is handed in a row, with nobody else speaking, before the conversation pauses. |
 | `AutoAllow`, `AlwaysDeny` | Claude Code permission rules, passed as `--allowedTools` and `--disallowedTools`. Leave a list out to get its default; write `[]` to empty it. |
+| `Openers` | Global user ids who may ask Lane in conversation to open or close projects. Empty means only her monologue can. |
 | `PassEnvironment` | Variables Claude Code may inherit even though their names look like secrets. Every other inherited variable whose name contains `KEY`, `TOKEN`, `SECRET` or `PASSWORD` is removed before Claude Code starts. |
 
 ## Permissions
@@ -86,11 +89,21 @@ have happen without anyone looking, and keep `AlwaysDeny` firm.
 | `git` | coding conversations | `status`, `diff`, `log`, `commit` (stages everything first), `branches`, `switch`, `pull`, `push`, `set_remote`. There is no force-push, reset or clean. |
 | `github_issues` | coding conversations | Lists a repository's issues or views one with its comments. Needs a token and a GitHub `origin`. |
 | `restart_self` | Lane's own workspace | Rebuilds Lane and restarts her onto the new build, only if the build succeeds. |
-| `open_coding_surface` | monologue | Creates a new project and its conversation. |
-| `close_coding_surface` | monologue | Ends a project's conversation. Its directory is kept. |
+| `open_coding_surface` | monologue, and replies to `Openers` | Opens a project by name: creates it, reopens it, or finds it already open. An optional brief is sent to Claude Code straight away. |
+| `close_coding_surface` | monologue, and replies to `Openers` | Ends a project's conversation. Its directory is kept. |
 
-The monologue sees coding conversations in its list of open conversations, and briefs Claude Code by speaking into one
-with `speak_to_session`.
+The monologue sees coding conversations in its list of open conversations, and can also brief Claude Code by speaking
+into one with `speak_to_session`.
+
+## Energy
+
+Claude Code's tokens come out of Lane's energy budget, counted the same way as her own model calls: input, output and
+cache writes in full, and cache reads at `Lane:Energy:CacheReadWeight`. Each finished Claude Code turn is charged when
+it ends, so a long turn can take her below zero and put her to sleep. Its usage appears on the dashboard as the model
+`claude-code`.
+
+While she is asleep, Lane sends Claude Code nothing new, but whatever Claude Code was already doing finishes, and is
+charged. To make her stop using coding tools when tired, add them to a tier's `DenyTools`.
 
 ## GitHub
 

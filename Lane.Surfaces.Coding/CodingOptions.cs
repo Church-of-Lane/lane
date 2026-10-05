@@ -44,6 +44,12 @@ public sealed class CodingOptions
     /// </summary>
     public List<string> PassEnvironment { get; set; } = [];
 
+    /// <summary>
+    /// Global user ids who may have Lane open or close coding projects in conversation. The
+    /// monologue may always; with this empty, nobody else may.
+    /// </summary>
+    public List<string> Openers { get; set; } = [];
+
     public List<CodingWorkspaceOptions> Workspaces { get; set; } = [];
 
     public static IReadOnlyList<string> DefaultAutoAllow { get; } =

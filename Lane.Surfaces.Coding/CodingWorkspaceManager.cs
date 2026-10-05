@@ -25,9 +25,12 @@ public interface ICodingWorkspaces
 
     CodingWorkspace? Find(string id);
 
-    /// <summary>Creates a new directory with a git repository, and a coding surface for it.</summary>
-    /// <param name="gitHubRepo">"owner/name" to set as origin, or null.</param>
-    Task<CodingWorkspace> OpenAsync(string name, string purpose, string? gitHubRepo, CancellationToken ct);
+    /// <summary>
+    /// Opens the project with this name: an open one is returned as it is, a closed one is
+    /// reopened, and otherwise a new directory with a git repository is created.
+    /// </summary>
+    /// <param name="gitHubRepo">"owner/name" to set as origin of a new project, or null.</param>
+    Task<CodingWorkspaceOpening> OpenAsync(string name, string purpose, string? gitHubRepo, CancellationToken ct);
 
     /// <summary>Stops a surface Lane opened and forgets it. The directory is kept.</summary>
     Task<bool> CloseAsync(string id, CancellationToken ct);
@@ -37,6 +40,10 @@ public interface ICodingWorkspaces
 
     IReadOnlyList<PermissionRequest> PendingPermissions(string id);
 }
+
+public enum OpeningOutcome { Created, Reopened, AlreadyOpen }
+
+public sealed record CodingWorkspaceOpening(CodingWorkspace Workspace, OpeningOutcome Outcome);
 
 public sealed partial class CodingWorkspaceManager(
     CodingOptions        options,
@@ -120,7 +127,7 @@ public sealed partial class CodingWorkspaceManager(
             _log.LogInformation("{Count} coding workspace(s): {Ids}", _workspaces.Count, string.Join(", ", _workspaces.Keys.Order()));
     }
 
-    public async Task<CodingWorkspace> OpenAsync(string name, string purpose, string? gitHubRepo, CancellationToken ct)
+    public async Task<CodingWorkspaceOpening> OpenAsync(string name, string purpose, string? gitHubRepo, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A coding surface needs a name.");
 
@@ -136,28 +143,44 @@ public sealed partial class CodingWorkspaceManager(
 
         try
         {
-            string id   = UniqueId(Slug(name));
-            string root = options.ResolvedWorkspacesRoot;
-            string path = Path.Combine(root, id);
+            string id   = Slug(name);
+            string path = Path.Combine(options.ResolvedWorkspacesRoot, id);
 
-            if (Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any())
-                throw new InvalidOperationException($"{path} already exists and is not empty.");
+            if (_workspaces.TryGetValue(id, out CodingWorkspace? open))
+                return new CodingWorkspaceOpening(open, OpeningOutcome.AlreadyOpen);
 
-            Directory.CreateDirectory(path);
+            OpeningOutcome outcome;
+
+            if (Directory.Exists(Path.Combine(path, ".git")))
+            {
+                outcome = OpeningOutcome.Reopened;
+            }
+            else if (Directory.Exists(path) && Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                throw new InvalidOperationException($"{path} already exists, is not empty, and is not a git repository.");
+            }
+            else
+            {
+                outcome = OpeningOutcome.Created;
+                Directory.CreateDirectory(path);
+            }
 
             CodingWorkspace workspace = Build(
                 id, name.Trim(), path, purpose, selfHosted: false, dynamic: true, options.GitHubToken, model: null);
 
-            await InitialiseRepositoryAsync(workspace, remote, ct).ConfigureAwait(false);
+            if (outcome == OpeningOutcome.Created) await InitialiseRepositoryAsync(workspace, remote, ct).ConfigureAwait(false);
 
             await store.SetAsync(Scope, WorkspacePrefix + id,
                 new WorkspaceRecord(id, workspace.Name, path, purpose, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
             await StartWorkspaceAsync(workspace, ct).ConfigureAwait(false);
 
-            _log.LogInformation("Opened coding workspace '{Id}' at {Path}", id, path);
+            if (!_workspaces.ContainsKey(id))
+                throw new InvalidOperationException($"The coding surface for {path} failed to start; see the log.");
 
-            return workspace;
+            _log.LogInformation("{Outcome} coding workspace '{Id}' at {Path}", outcome, id, path);
+
+            return new CodingWorkspaceOpening(workspace, outcome);
         }
         finally { _opening.Release(); }
     }
@@ -315,16 +338,6 @@ public sealed partial class CodingWorkspaceManager(
     {
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
         _opening.Dispose();
-    }
-
-    private string UniqueId(string slug)
-    {
-        string candidate = slug;
-
-        for (int n = 2; _workspaces.ContainsKey(candidate) || Directory.Exists(Path.Combine(options.ResolvedWorkspacesRoot, candidate)); n++)
-            candidate = $"{slug[..Math.Min(slug.Length, 28)]}-{n}";
-
-        return candidate;
     }
 
     internal static string Slug(string name)

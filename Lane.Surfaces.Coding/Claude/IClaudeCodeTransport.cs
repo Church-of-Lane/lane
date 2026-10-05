@@ -1,14 +1,18 @@
+using Lane.Core.Models;
+
 namespace Lane.Surfaces.Coding.Claude;
 
 /// <summary>What Claude Code said and did in one turn.</summary>
 /// <param name="Outcome">"completed", "interrupted", or the error kind.</param>
 /// <param name="Activity">One phrase per tool call, in order.</param>
+/// <param name="Usage">Tokens spent by this turn alone; empty when it never reported.</param>
 public sealed record ClaudeTurn(
     string                Text,
     bool                  IsError,
     string                Outcome,
     decimal               TotalCostUsd,
-    IReadOnlyList<string> Activity);
+    IReadOnlyList<string> Activity,
+    TokenUsage            Usage = default);
 
 /// <summary>One Claude Code conversation, which may outlive the process running it.</summary>
 public interface IClaudeCodeTransport : IAsyncDisposable

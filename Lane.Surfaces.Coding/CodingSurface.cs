@@ -144,6 +144,9 @@ public sealed class CodingSurface : ISurface
 
     private void OnClaudeTurn(ClaudeTurn turn)
     {
+        if (turn.Usage.Total + turn.Usage.CacheRead + turn.Usage.CacheWrite > 0)
+            _bus.Publish(new TokenUsageEvent(StreamJson.ModelInstanceId, "coding", turn.Usage));
+
         bool submit = false, justPaused = false;
         int count;
 

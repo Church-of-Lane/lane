@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Lane.Core.Models;
 
 namespace Lane.Surfaces.Coding.Claude;
 
@@ -11,14 +12,16 @@ public abstract record ClaudeEvent
     /// <summary>A tool call in the main conversation. Subagents' calls are not reported.</summary>
     public sealed record ToolUse(string Name, string Summary) : ClaudeEvent;
 
+    /// <param name="Usage">Tokens spent by this turn alone.</param>
     public sealed record Result(
-        string  SessionId,
-        string  Subtype,
-        bool    IsError,
-        string? Text,
-        decimal TotalCostUsd,
-        string? TerminalReason,
-        int     QueuedTurns) : ClaudeEvent;
+        string     SessionId,
+        string     Subtype,
+        bool       IsError,
+        string?    Text,
+        decimal    TotalCostUsd,
+        string?    TerminalReason,
+        int        QueuedTurns,
+        TokenUsage Usage) : ClaudeEvent;
 
     public sealed record ControlResponse(string RequestId, bool Success) : ClaudeEvent;
 }
@@ -68,7 +71,8 @@ public static class StreamJson
                     String(root, "result"),
                     root.TryGetProperty("total_cost_usd", out JsonElement cost) && cost.TryGetDecimal(out decimal c) ? c : 0,
                     String(root, "terminal_reason"),
-                    root.TryGetProperty("queued_turn_count", out JsonElement q) && q.TryGetInt32(out int n) ? n : 0)];
+                    root.TryGetProperty("queued_turn_count", out JsonElement q) && q.TryGetInt32(out int n) ? n : 0,
+                    Usage(root))];
 
             case "control_response" when root.TryGetProperty("response", out JsonElement response):
                 return [new ClaudeEvent.ControlResponse(
@@ -78,6 +82,29 @@ public static class StreamJson
             default:
                 return [];
         }
+    }
+
+    public const string ModelInstanceId = "claude-code";
+
+    private static TokenUsage Usage(JsonElement root)
+    {
+        int Count(JsonElement usage, string name) =>
+            usage.TryGetProperty(name, out JsonElement value) && value.TryGetInt32(out int n) ? n : 0;
+
+        TimeSpan latency = root.TryGetProperty("duration_ms", out JsonElement ms) && ms.TryGetInt64(out long d)
+            ? TimeSpan.FromMilliseconds(d)
+            : TimeSpan.Zero;
+
+        if (!root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
+            return new TokenUsage(0, 0, 0, 0, ModelInstanceId, latency);
+
+        return new TokenUsage(
+            Count(usage, "input_tokens"),
+            Count(usage, "output_tokens"),
+            Count(usage, "cache_read_input_tokens"),
+            Count(usage, "cache_creation_input_tokens"),
+            ModelInstanceId,
+            latency);
     }
 
     private static bool HasParent(JsonElement root) =>

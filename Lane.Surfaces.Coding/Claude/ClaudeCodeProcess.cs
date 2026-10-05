@@ -300,7 +300,8 @@ public sealed class ClaudeCodeProcess(
                     result.IsError,
                     Outcome(result),
                     result.TotalCostUsd,
-                    TakeActivity()), answered: !_busy);
+                    TakeActivity(),
+                    result.Usage), answered: !_busy);
                 break;
         }
     }

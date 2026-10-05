@@ -56,10 +56,10 @@ internal static class Openers
     public static ToolResult? Refusal(ToolContext context)
     {
         if (context.Turn == TurnKind.Monologue) return null;
-        
-        return null;
 
         CodingOptions? options = context.Services.GetService<CodingOptions>();
+
+        if (options?.AnyoneMayOpen == true) return null;
 
         string? person = context.Requester?.GlobalUserId;
 

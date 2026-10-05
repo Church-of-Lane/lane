@@ -609,7 +609,10 @@ public sealed class OpenCodingSurfaceToolTests
     private static readonly SurfaceId Discord = new("discord.main");
 
     private static (ITool Tool, ToolContext Context, FakeWorkspaces Workspaces, CodingSurfaceTests.RecordingKernel Kernel) Build(
-        TurnKind turn, string? requester, params string[] openers)
+        TurnKind turn, string? requester, params string[] openers) => Build(turn, requester, anyoneMayOpen: false, openers);
+
+    private static (ITool Tool, ToolContext Context, FakeWorkspaces Workspaces, CodingSurfaceTests.RecordingKernel Kernel) Build(
+        TurnKind turn, string? requester, bool anyoneMayOpen, params string[] openers)
     {
         FakeWorkspaces workspaces = new();
         CodingSurfaceTests.RecordingKernel kernel = new();
@@ -617,7 +620,7 @@ public sealed class OpenCodingSurfaceToolTests
         ServiceProvider services = new ServiceCollection()
             .AddSingleton<ICodingWorkspaces>(workspaces)
             .AddSingleton<IAgentKernel>(kernel)
-            .AddSingleton(new CodingOptions { Openers = [.. openers] })
+            .AddSingleton(new CodingOptions { Openers = [.. openers], AnyoneMayOpen = anyoneMayOpen })
             .BuildServiceProvider();
 
         ToolContext context = new()
@@ -669,6 +672,18 @@ public sealed class OpenCodingSurfaceToolTests
 
         Assert.Equal("coding.game/Text/claude", session.Value);
         Assert.Equal("Make a snake game.", Assert.IsType<SessionWorkItem.Speak>(item).Text);
+    }
+
+    [Fact]
+    public async Task With_anyone_may_open_a_stranger_can_have_a_project_opened()
+    {
+        (ITool tool, ToolContext context, FakeWorkspaces workspaces, _) =
+            Build(TurnKind.Respond, "stranger", anyoneMayOpen: true, "jahan");
+
+        ToolResult result = await Invoke(tool, context, new { name = "Game", purpose = "fun" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Equal(["Game"], workspaces.Opened);
     }
 
     [Fact]

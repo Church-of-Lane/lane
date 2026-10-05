@@ -46,9 +46,12 @@ public sealed class CodingOptions
 
     /// <summary>
     /// Global user ids who may have Lane open or close coding projects in conversation. The
-    /// monologue may always; with this empty, nobody else may.
+    /// monologue may always; with this empty, nobody else may. Ignored when <see cref="AnyoneMayOpen"/> is set.
     /// </summary>
     public List<string> Openers { get; set; } = [];
+
+    /// <summary>Anyone may ask Lane in conversation to open or close coding projects, and she decides whether to.</summary>
+    public bool AnyoneMayOpen { get; set; }
 
     public List<CodingWorkspaceOptions> Workspaces { get; set; } = [];
 

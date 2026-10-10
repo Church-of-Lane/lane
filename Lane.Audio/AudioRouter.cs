@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Lane.Audio.Dsp;
 using Lane.Audio.Voiceprints;
 using Lane.Core.Identity;
 using Lane.Core.Kernel;
@@ -142,8 +143,12 @@ public sealed class AudioRouter(
         // has already been cut off by the interim result that preceded this.
         floor.NoticeFinal(binding.Session);
 
-        LaneMessage message = LaneMessage.User(
-            binding.Session, speaker, transcript.Text, DateTimeOffset.UtcNow);
+        List<ContentPart> content = [new TextPart(transcript.Text)];
+
+        if (transcript.Audio is { } audio)
+            content.Add(new AudioPart(PcmConverter.ToWav(audio.Pcm.Span, audio.Format), "wav"));
+
+        LaneMessage message = LaneMessage.User(binding.Session, speaker, content, DateTimeOffset.UtcNow);
 
         await kernel.SubmitAsync(new InboundEvent
         {

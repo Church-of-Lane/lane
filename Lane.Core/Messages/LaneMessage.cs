@@ -60,6 +60,9 @@ public sealed record LaneMessage
 
     public bool HasToolUse => Content.Any(p => p is ToolUsePart);
 
+    public LaneMessage WithoutAudio() =>
+        Content.Any(p => p is AudioPart) ? this with { Content = [.. Content.Where(p => p is not AudioPart)] } : this;
+
     public static LaneMessage User(
         SessionId session, Participant author, string text, DateTimeOffset timestamp, string? externalId = null) =>
         new()

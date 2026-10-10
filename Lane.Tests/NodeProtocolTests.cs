@@ -25,7 +25,8 @@ public sealed class NodeProtocolTests
             Messages =
             [
                 LaneMessage.User(session, author,
-                    [new TextPart("look"), new ImagePart(null, new byte[] { 1, 2, 3 }, "image/png")],
+                    [new TextPart("look"), new ImagePart(null, new byte[] { 1, 2, 3 }, "image/png"),
+                     new AudioPart(new byte[] { 4, 5, 6 }, "wav")],
                     DateTimeOffset.UnixEpoch),
                 LaneMessage.Assistant(session, Participant.Lane(surface),
                     [new ToolUsePart("call-1", "web_search", JsonDocument.Parse("""{"q":"x"}""").RootElement)],
@@ -56,6 +57,10 @@ public sealed class NodeProtocolTests
 
         ImagePart image = Assert.IsType<ImagePart>(back.Request.Messages[0].Content[1]);
         Assert.Equal(new byte[] { 1, 2, 3 }, image.Data!.Value.ToArray());
+
+        AudioPart audio = Assert.IsType<AudioPart>(back.Request.Messages[0].Content[2]);
+        Assert.Equal(new byte[] { 4, 5, 6 }, audio.Data.ToArray());
+        Assert.Equal("wav", audio.Format);
 
         ToolUsePart call = Assert.IsType<ToolUsePart>(back.Request.Messages[1].Content[0]);
         Assert.Equal("x", call.Arguments.GetProperty("q").GetString());

@@ -35,7 +35,7 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 - **MCP** — configured servers contribute their tools, namespaced and sanitised, retried when down, kept out of the unattended monologue unless a server opts in
 - **Coding** — she works with Claude Code in a conversation of its own: steering it, answering its permission requests, committing and pushing with git, and reading GitHub issues. She can start new projects from her monologue, and rebuild and restart herself from her own source, but only when it builds
 - **Nodes** — other people can lend Lane a model over a WebSocket, earn credits for answering, and spend them to sponsor where she listens
-- **Voice** — streaming TTS through ElevenLabs or local [flite](https://github.com/festvox/flite), Azure STT, barge-in and a per-session floor. She walks into a voice channel when asked rather than at startup
+- **Voice** — streaming TTS through ElevenLabs or local [flite](https://github.com/festvox/flite), Azure or OpenRouter STT, barge-in and a per-session floor. She walks into a voice channel when asked rather than at startup
 - **Image understanding** — she can see and interpret images shared with her
   ![Viewing an image](Resources/Images/Seeing.png)
 - **Time awareness** — keeps track of the current time
@@ -71,7 +71,7 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 | LLM | Anthropic, any OpenAI-compatible endpoint (OpenRouter, DeepSeek), TypeSafe System One, or community nodes |
 | Storage | SQLite |
 | TTS | ElevenLabs or flite (local) |
-| STT | Azure |
+| STT | Azure, or any transcription model on OpenRouter |
 
 ---
 
@@ -81,7 +81,7 @@ Lane is a Discord/terminal chatbot designed to feel authentic and personality-dr
 
 - **Required:** an API key for at least one model provider
 - **For Discord:** a Discord bot application and its token
-- **For voice:** Azure speech key and region; ElevenLabs key unless she speaks through flite (`brew install flite` / `apt install flite`)
+- **For voice:** Azure speech key and region, or an OpenRouter key with `Audio:Recognizer` set to `openrouter`; ElevenLabs key unless she speaks through flite (`brew install flite` / `apt install flite`)
 - **For search:** a Brave Search API key
 
 ### 2. Configure your `.env` file
@@ -92,8 +92,8 @@ Secrets are referenced from configuration as `env:NAME`, so the names are yours.
 OPENROUTER_API_KEY=  # or ANTHROPIC_API_KEY, if a model instance points at it
 DISCORD_API_KEY=     # Required for Discord
 BRAVE_API_KEY=       # Required for web search
-AZURE_KEY=           # Required for STT
-AZURE_REGION=        # Required for STT
+AZURE_KEY=           # Required for STT unless Audio:Recognizer is "openrouter"
+AZURE_REGION=        # Required for STT unless Audio:Recognizer is "openrouter"
 ELEVENLABS_KEY=      # Required for TTS unless using flite
 LANE_IOS_KEY=        # One per API client app
 GITHUB_TOKEN=        # Optional: pushing and reading issues from coding surfaces

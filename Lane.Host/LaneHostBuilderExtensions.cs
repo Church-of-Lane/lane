@@ -381,16 +381,25 @@ public static class LaneHostBuilderExtensions
 
         options.Recognition.Key    = secrets.Resolve(section["Recognition:KeyRef"]) ?? options.Recognition.Key;
         options.Recognition.Region = secrets.Resolve(section["Recognition:RegionRef"]) ?? options.Recognition.Region;
+        options.OpenRouter.ApiKey  = secrets.Resolve(section["OpenRouter:KeyRef"]) ?? options.OpenRouter.ApiKey;
         options.Synthesis.ApiKey   = secrets.Resolve(section["Synthesis:KeyRef"]) ?? options.Synthesis.ApiKey;
 
         // Throws on an unknown name, here rather than at the first clause.
         SpeechProvider provider = options.ResolveProvider();
+        RecognitionProvider recognition = options.ResolveRecognizer();
 
-        if (string.IsNullOrWhiteSpace(options.Recognition.Key))
+        if (recognition is RecognitionProvider.Azure && string.IsNullOrWhiteSpace(options.Recognition.Key))
         {
             throw new InvalidOperationException(
                 "Lane:Audio is enabled but the recognition key is missing. Set Recognition:KeyRef " +
                 "and Recognition:RegionRef, or turn Audio off.");
+        }
+
+        if (recognition is RecognitionProvider.OpenRouter && string.IsNullOrWhiteSpace(options.OpenRouter.ApiKey))
+        {
+            throw new InvalidOperationException(
+                "Lane:Audio:Recognizer is 'openrouter' but OpenRouter:KeyRef resolved to nothing. Set it, " +
+                "switch Recognizer to 'azure', or turn Audio off.");
         }
 
         // Checked here rather than at the first utterance. A missing model does not stop

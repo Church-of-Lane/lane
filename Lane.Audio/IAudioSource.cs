@@ -46,7 +46,10 @@ public sealed record Transcript(
     /// Discord gives one source per speaker, and a named socket says who it is up front.
     /// Set only when one source carries several people and the words alone cannot say which.
     /// </summary>
-    VoiceSample? Voice = null);
+    VoiceSample? Voice = null,
+
+    /// <summary>The utterance itself, on a final result whose recogniser still had it.</summary>
+    AudioFrame? Audio = null);
 
 /// <summary>How a source's speakers are told apart.</summary>
 public enum SpeakerAttribution

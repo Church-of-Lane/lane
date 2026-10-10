@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -42,6 +43,31 @@ public static class PcmConverter
         while ((read = wave.Read(buffer, 0, buffer.Length)) > 0) output.Write(buffer, 0, read);
 
         return output.ToArray();
+    }
+
+    /// <summary>Wraps PCM in a WAV header.</summary>
+    public static byte[] ToWav(ReadOnlySpan<byte> pcm, AudioFormat format)
+    {
+        byte[] wav = new byte[44 + pcm.Length];
+
+        Span<byte> header = wav;
+
+        "RIFF"u8.CopyTo(header);
+        BinaryPrimitives.WriteInt32LittleEndian(header[4..], 36 + pcm.Length);
+        "WAVEfmt "u8.CopyTo(header[8..]);
+        BinaryPrimitives.WriteInt32LittleEndian(header[16..], 16);
+        BinaryPrimitives.WriteInt16LittleEndian(header[20..], 1);
+        BinaryPrimitives.WriteInt16LittleEndian(header[22..], (short)format.Channels);
+        BinaryPrimitives.WriteInt32LittleEndian(header[24..], format.SampleRate);
+        BinaryPrimitives.WriteInt32LittleEndian(header[28..], format.BytesPerSecond);
+        BinaryPrimitives.WriteInt16LittleEndian(header[32..], (short)format.BytesPerFrame);
+        BinaryPrimitives.WriteInt16LittleEndian(header[34..], (short)format.BitsPerSample);
+        "data"u8.CopyTo(header[36..]);
+        BinaryPrimitives.WriteInt32LittleEndian(header[40..], pcm.Length);
+
+        pcm.CopyTo(header[44..]);
+
+        return wav;
     }
 
     /// <summary>

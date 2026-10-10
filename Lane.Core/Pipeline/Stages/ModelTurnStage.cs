@@ -76,6 +76,9 @@ public sealed class ModelTurnStage(
 
         List<LaneMessage> messages = [.. ctx.Context.InlineMessages, .. ctx.Incoming];
 
+        if (!model.Descriptor.Supports(ModelCapabilities.Audio))
+            messages = [.. messages.Select(m => m.WithoutAudio())];
+
         if (messages.Count == 0)
         {
             log.LogDebug("Nothing to respond to in {Session}", ctx.Session.Id);

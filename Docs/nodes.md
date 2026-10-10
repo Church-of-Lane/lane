@@ -115,7 +115,7 @@ LaneNode node = new(options, key, (request, ct) => model.CompleteAsync(request, 
 | `Model` | *required* | What you answer with. Shown on the leaderboard and in `/v1/nodes`, and nothing else. |
 | `Pool` | `default` | The pool to join. It must match the `Pool` of a model instance, or nothing is sent to you. |
 | `Name` | machine name | Shown next to your identity. |
-| `Capabilities` | `Tools, Streaming, StopSequences` | What your handler supports. See `ModelCapabilities`: `Tools`, `ParallelTools`, `Streaming`, `Images`, `PromptCaching`, `StructuredOutput`, `StopSequences`, `Thinking`. |
+| `Capabilities` | `Tools, Streaming, StopSequences` | What your handler supports. See `ModelCapabilities`: `Tools`, `ParallelTools`, `Streaming`, `Images`, `PromptCaching`, `StructuredOutput`, `StopSequences`, `Thinking`, `Audio`. |
 | `MaxConcurrency` | `4` | The most requests Lane will send you at once. |
 | `ReconnectMin` / `ReconnectMax` | 1 s / 30 s | Reconnect backoff bounds. |
 
@@ -126,7 +126,7 @@ The handler gets a `ModelRequest`:
 | Field | Meaning |
 |---|---|
 | `System` | Ordered `PromptBlock`s, each with a `CacheHint`. Keep them in order. |
-| `Messages` | The conversation as `LaneMessage`s. Content parts can be `TextPart`, `ImagePart`, `ToolUsePart`, `ToolResultPart` or `ThinkingPart`. |
+| `Messages` | The conversation as `LaneMessage`s. Content parts can be `TextPart`, `ImagePart`, `ToolUsePart`, `ToolResultPart` or `ThinkingPart` — and `AudioPart`, a WAV of what was just said beside its transcript, if both your node and the pool declare `Audio`. |
 | `Tools`, `ToolChoice` | The tools on offer, and whether one must be called. |
 | `ResponseFormat` | A JSON schema, when structured output is requested. |
 | `MaxOutputTokens`, `Temperature`, `StopSequences` | Generation settings. |

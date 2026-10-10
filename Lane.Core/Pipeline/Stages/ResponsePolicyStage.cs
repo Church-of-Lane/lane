@@ -122,7 +122,9 @@ public sealed class ResponsePolicyStage(
             ModelResponse response = await model.CompleteAsync(new ModelRequest
             {
                 System   = [new PromptBlock(Instructions(ctx, model.Descriptor), CacheHint.Ephemeral)],
-                Messages = [.. ctx.Incoming],
+                Messages = model.Descriptor.Supports(ModelCapabilities.Audio)
+                    ? [.. ctx.Incoming]
+                    : [.. ctx.Incoming.Select(m => m.WithoutAudio())],
                 Tools    = [Assess],
 
                 // Forced, so there is no branch where the model answers in prose and the

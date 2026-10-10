@@ -322,12 +322,15 @@ public sealed class AgentLoopTests
     }
 
     [Fact]
-    public async Task The_tool_call_budget_refuses_further_calls_but_still_answers_them()
+    public async Task The_tool_call_budget_refuses_further_calls_and_lets_the_model_reply()
     {
         FakeTool tool = new("again", (_, _) => ValueTask.FromResult(ToolResult.Ok("ok")));
 
-        ScriptedLanguageModel model = new((_, i) =>
-            ScriptedLanguageModel.ToolCall("again", new { }, $"c{i}"));
+        ScriptedLanguageModel model = ScriptedLanguageModel.Sequence(
+            ScriptedLanguageModel.ToolCall("again", new { }, "c1"),
+            ScriptedLanguageModel.ToolCall("again", new { }, "c2"),
+            ScriptedLanguageModel.ToolCall("again", new { }, "c3"),
+            ScriptedLanguageModel.Text("fine, I'll stop"));
 
         ToolRegistry registry = Registry(null, tool);
 
@@ -335,11 +338,15 @@ public sealed class AgentLoopTests
             .RunAsync(await RequestAsync(model, registry, new AgentBudget(MaxSteps: 6, MaxToolCalls: 2)), default);
 
         Assert.Equal(2, tool.Calls);
+        Assert.Equal(4, model.CallCount);
         AssertPaired(result.NewMessages);
 
-        ToolResultPart refused = result.NewMessages.Last().Content.OfType<ToolResultPart>().Single();
+        ToolResultPart refused = result.NewMessages.SelectMany(m => m.Content).OfType<ToolResultPart>().Last();
         Assert.True(refused.IsError);
-        Assert.Contains("budget", refused.Content.OfType<TextPart>().Single().Text);
+        Assert.Equal("Max tool calls reached.", refused.Content.OfType<TextPart>().Single().Text);
+
+        Assert.Equal(StopReason.EndTurn, result.Stop);
+        Assert.Equal("fine, I'll stop", result.FinalText);
     }
 
     // ---- helpers -----------------------------------------------------------

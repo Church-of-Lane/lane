@@ -25,7 +25,11 @@ public sealed class AudioSetupOptions
     /// </summary>
     public string Provider { get; set; } = "elevenlabs";
 
+    /// <summary>What turns speech into words: <c>azure</c> or <c>openrouter</c>.</summary>
+    public string Recognizer { get; set; } = "azure";
+
     public AzureSpeechOptions Recognition { get; set; } = new();
+    public OpenRouterSpeechOptions OpenRouter { get; set; } = new();
     public ElevenLabsOptions  Synthesis   { get; set; } = new();
     public FliteOptions       Flite       { get; set; } = new();
     public BargeInOptions     BargeIn     { get; set; } = new();
@@ -44,12 +48,27 @@ public sealed class AudioSetupOptions
         _ => throw new InvalidOperationException(
             $"Lane:Audio:Provider is '{Provider}'. It must be 'elevenlabs' or 'flite'."),
     };
+
+    public RecognitionProvider ResolveRecognizer() => Recognizer?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "azure" => RecognitionProvider.Azure,
+        "openrouter"          => RecognitionProvider.OpenRouter,
+
+        _ => throw new InvalidOperationException(
+            $"Lane:Audio:Recognizer is '{Recognizer}'. It must be 'azure' or 'openrouter'."),
+    };
 }
 
 public enum SpeechProvider
 {
     ElevenLabs,
     Flite,
+}
+
+public enum RecognitionProvider
+{
+    Azure,
+    OpenRouter,
 }
 
 public static class ServiceCollectionExtensions
@@ -68,6 +87,7 @@ public static class ServiceCollectionExtensions
         // Read now rather than inside the factory: an unknown provider is a configuration
         // mistake, and finding out at the first clause means finding out mid-conversation.
         SpeechProvider provider = options.ResolveProvider();
+        RecognitionProvider recognition = options.ResolveRecognizer();
 
         services.AddSingleton(options);
         services.AddSingleton(options.Recognition);
@@ -94,12 +114,26 @@ public static class ServiceCollectionExtensions
         // depends on the source — one person's headset and a microphone in a room are
         // different questions to ask the service, and asking the wrong one attributes a
         // whole room to whoever the source was registered as.
-        services.AddSingleton<Func<SpeakerAttribution, ISpeechRecognizer>>(sp => attribution =>
-            attribution == SpeakerAttribution.Diarized
-                ? new DiarizingSpeechRecognizer(
-                    options.Recognition, sp.GetRequiredService<ILogger<DiarizingSpeechRecognizer>>())
-                : new AzureSpeechRecognizer(
-                    options.Recognition, sp.GetRequiredService<ILogger<AzureSpeechRecognizer>>()));
+        if (recognition is RecognitionProvider.OpenRouter)
+        {
+            HttpClient http = new() { Timeout = TimeSpan.FromSeconds(60) };
+
+            services.AddSingleton<Func<SpeakerAttribution, ISpeechRecognizer>>(sp => attribution =>
+                new OpenRouterSpeechRecognizer(
+                    http,
+                    options.OpenRouter,
+                    sp.GetRequiredService<ILogger<OpenRouterSpeechRecognizer>>(),
+                    sampleVoices: attribution == SpeakerAttribution.Diarized && options.Voiceprints.Enabled));
+        }
+        else
+        {
+            services.AddSingleton<Func<SpeakerAttribution, ISpeechRecognizer>>(sp => attribution =>
+                attribution == SpeakerAttribution.Diarized
+                    ? new DiarizingSpeechRecognizer(
+                        options.Recognition, sp.GetRequiredService<ILogger<DiarizingSpeechRecognizer>>())
+                    : new AzureSpeechRecognizer(
+                        options.Recognition, sp.GetRequiredService<ILogger<AzureSpeechRecognizer>>()));
+        }
 
         services.AddSingleton(options.Voiceprints);
 

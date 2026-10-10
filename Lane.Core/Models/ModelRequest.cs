@@ -42,6 +42,12 @@ public sealed record ModelRequest
     public required IReadOnlyList<PromptBlock> System   { get; init; }
     public required IReadOnlyList<LaneMessage> Messages { get; init; }
 
+    /// <summary>This request as a model with the given capabilities can take it.</summary>
+    public ModelRequest For(ModelCapabilities capabilities) =>
+        capabilities.HasFlag(ModelCapabilities.Audio) || !Messages.Any(m => m.Content.Any(p => p is AudioPart))
+            ? this
+            : this with { Messages = [.. Messages.Select(m => m.WithoutAudio())] };
+
     public IReadOnlyList<ToolDescriptor> Tools { get; init; } = [];
     public ToolChoice     ToolChoice     { get; init; } = ToolChoice.Auto;
     public ResponseFormat? ResponseFormat { get; init; }

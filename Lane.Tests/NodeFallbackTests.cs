@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using Lane.Core.Identity;
+using Lane.Core.Messages;
 using Lane.Core.Models;
 using Lane.Nodes;
 using Lane.Nodes.Protocol;
@@ -56,6 +58,27 @@ public sealed class NodeFallbackTests
             .CompleteAsync(Request, TestContext.Current.CancellationToken);
 
         Assert.Equal("from default", response.Text);
+    }
+
+    [Fact]
+    public async Task A_fallback_that_cannot_take_audio_is_not_handed_any()
+    {
+        SurfaceId surface = new("api");
+        SessionId session = new(surface, SessionKind.Voice, "room");
+
+        ModelRequest heard = new()
+        {
+            System   = [],
+            Messages = [LaneMessage.User(session, new Participant(new ParticipantId(surface, "u1"), "alice"),
+                [new TextPart("hello"), new AudioPart(new byte[] { 1, 2, 3 }, "wav")], DateTimeOffset.UnixEpoch)]
+        };
+
+        ScriptedLanguageModel fallback = ScriptedLanguageModel.Echoing("from default", "default");
+
+        await Model(new NodePool(), fallback).CompleteAsync(heard, TestContext.Current.CancellationToken);
+
+        Assert.Equal("hello", Assert.Single(fallback.Requests).Messages[0].TextContent);
+        Assert.DoesNotContain(fallback.Requests[0].Messages[0].Content, p => p is AudioPart);
     }
 
     [Fact]

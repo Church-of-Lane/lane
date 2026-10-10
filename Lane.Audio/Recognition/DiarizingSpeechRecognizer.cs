@@ -78,7 +78,8 @@ public sealed class DiarizingSpeechRecognizer(AzureSpeechOptions options, ILogge
 
             transcripts.Writer.TryWrite(new Transcript(
                 e.Result.Text.Trim(), IsFinal: true, offset,
-                Voice: new VoiceSample(Label(e.Result.SpeakerId), pcm, source.Format)));
+                Voice: new VoiceSample(Label(e.Result.SpeakerId), pcm, source.Format),
+                Audio: pcm.Length > 0 ? new AudioFrame(pcm, source.Format, DateTimeOffset.UtcNow) : null));
         };
 
         if (options.EmitInterimResults)

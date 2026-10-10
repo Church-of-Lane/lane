@@ -16,7 +16,7 @@ public sealed class IngestStage(ILogger<IngestStage> log) : ITurnStage
             log.LogInformation("[{Session}] {Author}: {Text}",
                 ctx.Session.Id, message.Author.DisplayName, message.TextContent);
 
-            ctx.Produced.Add(message);
+            ctx.Produced.Add(message.WithoutAudio());
         }
 
         await next().ConfigureAwait(false);

@@ -143,6 +143,10 @@ public static class ResponseRecord
                 case ImagePart:
                     content.Append("[image]\n");
                     break;
+
+                case AudioPart:
+                    content.Append("[audio]\n");
+                    break;
             }
         }
 

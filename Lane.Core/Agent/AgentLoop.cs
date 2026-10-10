@@ -125,7 +125,7 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
                 bool overBudget = calls.Count + requested.Count > request.Budget.MaxToolCalls;
 
                 List<ToolOutcome> outcomes = overBudget
-                    ? [.. requested.Select(c => Refused(c, "the tool budget for this turn is exhausted"))]
+                    ? [.. requested.Select(Refused)]
                     : await InvokeAllAsync(requested, request, ct).ConfigureAwait(false);
 
                 LaneMessage results = LaneMessage.ToolResults(
@@ -143,10 +143,7 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
                 }
 
                 if (overBudget)
-                {
                     log.LogWarning("Tool budget exhausted after {Count} call(s)", calls.Count);
-                    break;
-                }
 
                 if (outcomes.FirstOrDefault(o => o.EndsTurn) is { } ending)
                 {
@@ -334,9 +331,9 @@ public sealed class AgentLoop(IToolRegistry tools, ILogger<AgentLoop> log)
             result.EndsTurn);
     }
 
-    private static ToolOutcome Refused(ToolUsePart call, string reason) => new(
+    private static ToolOutcome Refused(ToolUsePart call) => new(
         call.ToolName,
-        ToolResultPart.Text(call.ToolCallId, $"Not run: {reason}.", isError: true),
+        ToolResultPart.Text(call.ToolCallId, "Max tool calls reached.", isError: true),
         [],
         TimeSpan.Zero);
 

@@ -126,7 +126,8 @@ Proven by tests rather than asserted:
 - **tool traffic never reaches replayed memory**, so a window that trims between a call and
   its result cannot poison every later request; the transcript keeps the full record
 - parallel calls are answered in the order they were requested
-- step and tool-call budgets stop a model that will not stop calling tools
+- the step budget stops a model that will not stop calling tools; past the tool-call budget,
+  calls are answered with "Max tool calls reached." and the model gets to reply
 - gating: monologue-only tools are not offered during a reply, deny lists work globally and
   per surface, and a tool the model was never offered is refused when it calls one anyway
 - capability-gated tools keep the advertised set stable and are refused at the call — a
@@ -678,6 +679,10 @@ and startup holds it to that:
 { "Id": "default", "Provider": "openrouter", "Model": "deepseek/deepseek-v4-flash",
   "KeyRef": "env:OPENROUTER_API_KEY", "Capabilities": ["Tools", "Streaming"] }
 ```
+
+A model that declares `Audio` is handed each voice utterance as audio alongside its
+transcript, as an OpenAI-style `input_audio` part. The transcript is still what is
+remembered; the audio lasts for the turn it was said in.
 
 **One role does not want prose at all.** The response policy gate asks whether Lane should
 reply and how warmly — a decision, not a sentence. TypeSafe's Jev is a System One model

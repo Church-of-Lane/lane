@@ -48,6 +48,9 @@ public sealed class AzureSpeechOptions
 public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<AzureSpeechRecognizer> log)
     : ISpeechRecognizer
 {
+    /// <summary>How far behind the write head an utterance's audio stays recoverable.</summary>
+    private static readonly TimeSpan Window = TimeSpan.FromSeconds(30);
+
     public async IAsyncEnumerable<Transcript> TranscribeAsync(
         IAudioSource source, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -69,6 +72,8 @@ public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<Az
 
         options.ApplyPhrases(recognizer);
 
+        UtteranceBuffer heard = new(source.Format, Window);
+
         Channel<Transcript> transcripts = Channel.CreateUnbounded<Transcript>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
@@ -77,8 +82,13 @@ public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<Az
             if (e.Result.Reason != ResultReason.RecognizedSpeech) return;
             if (string.IsNullOrWhiteSpace(e.Result.Text)) return;
 
+            TimeSpan offset = e.Result.OffsetInTicks.Ticks();
+
+            ReadOnlyMemory<byte> pcm = heard.Slice(offset, e.Result.Duration);
+
             transcripts.Writer.TryWrite(new Transcript(
-                e.Result.Text.Trim(), IsFinal: true, e.Result.OffsetInTicks.Ticks()));
+                e.Result.Text.Trim(), IsFinal: true, offset,
+                Audio: pcm.Length > 0 ? new AudioFrame(pcm, source.Format, DateTimeOffset.UtcNow) : null));
         };
 
         if (options.EmitInterimResults)
@@ -105,7 +115,7 @@ public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<Az
         await recognizer.StartContinuousRecognitionAsync().ConfigureAwait(false);
 
         // Feeding runs alongside reading, so a silent speaker never blocks a talkative one.
-        Task pump = PumpAsync(source, push, transcripts, ct);
+        Task pump = PumpAsync(source, push, heard, transcripts, ct);
 
         try
         {
@@ -122,7 +132,11 @@ public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<Az
     }
 
     private async Task PumpAsync(
-        IAudioSource source, PushAudioInputStream push, Channel<Transcript> transcripts, CancellationToken ct)
+        IAudioSource source,
+        PushAudioInputStream push,
+        UtteranceBuffer heard,
+        Channel<Transcript> transcripts,
+        CancellationToken ct)
     {
         try
         {
@@ -130,7 +144,11 @@ public sealed class AzureSpeechRecognizer(AzureSpeechOptions options, ILogger<Az
             {
                 if (frame.Pcm.Length == 0) continue;
 
-                push.Write(frame.Pcm.ToArray());
+                byte[] pcm = frame.Pcm.ToArray();
+
+                heard.Write(pcm);
+
+                push.Write(pcm);
             }
         }
         catch (OperationCanceledException) { /* shutting down */ }

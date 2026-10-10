@@ -11,6 +11,7 @@ namespace Lane.Core.Messages;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
 [JsonDerivedType(typeof(TextPart),       "text")]
 [JsonDerivedType(typeof(ImagePart),      "image")]
+[JsonDerivedType(typeof(AudioPart),      "audio")]
 [JsonDerivedType(typeof(ToolUsePart),    "tool_use")]
 [JsonDerivedType(typeof(ToolResultPart), "tool_result")]
 [JsonDerivedType(typeof(ThinkingPart),   "thinking")]
@@ -21,6 +22,13 @@ public sealed record TextPart(string Text) : ContentPart;
 /// <summary>An image by reference or by value. Exactly one of <paramref name="Url"/> or
 /// <paramref name="Data"/> is expected to be set.</summary>
 public sealed record ImagePart(Uri? Url, ReadOnlyMemory<byte>? Data, string MediaType) : ContentPart;
+
+/// <summary>
+/// A clip of audio by value. Only ever in flight: it is stripped before a message is
+/// persisted, and before a request to a model without <c>ModelCapabilities.Audio</c>.
+/// </summary>
+/// <param name="Format">The container, as providers name it — "wav", "mp3".</param>
+public sealed record AudioPart(ReadOnlyMemory<byte> Data, string Format) : ContentPart;
 
 /// <summary>The model asking for a tool to run.</summary>
 public sealed record ToolUsePart(string ToolCallId, string ToolName, JsonElement Arguments) : ContentPart;

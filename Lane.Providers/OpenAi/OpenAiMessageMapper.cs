@@ -78,7 +78,7 @@ internal static class OpenAiMessageMapper
 
     private static JsonObject? ToUser(LaneMessage message)
     {
-        List<ContentPart> parts = [.. message.Content.Where(p => p is TextPart or ImagePart)];
+        List<ContentPart> parts = [.. message.Content.Where(p => p is TextPart or ImagePart or AudioPart)];
 
         if (parts.Count == 0) return null;
 
@@ -111,6 +111,18 @@ internal static class OpenAiMessageMapper
 
                 case ImagePart image when ToImageContent(image) is { } mapped:
                     content.Add(mapped);
+                    break;
+
+                case AudioPart audio:
+                    content.Add(new JsonObject
+                    {
+                        ["type"]        = "input_audio",
+                        ["input_audio"] = new JsonObject
+                        {
+                            ["data"]   = Convert.ToBase64String(audio.Data.Span),
+                            ["format"] = audio.Format
+                        }
+                    });
                     break;
             }
         }

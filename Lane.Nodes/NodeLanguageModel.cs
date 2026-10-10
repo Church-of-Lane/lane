@@ -51,7 +51,8 @@ public sealed class NodeLanguageModel : ILanguageModel
 
         (ModelResponse? answer, ILanguageModel? fallback) = await ServeAsync(request, ct).ConfigureAwait(false);
 
-        return answer ?? await fallback!.CompleteAsync(request, ct).ConfigureAwait(false);
+        return answer ?? await fallback!
+            .CompleteAsync(request.For(fallback.Descriptor.Capabilities), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -113,6 +114,9 @@ public sealed class NodeLanguageModel : ILanguageModel
 
         NodeConnection node = lease.Node;
 
+        // The pool's capabilities are a promise the node may not have made itself.
+        request = request.For(node.Hello.Capabilities);
+
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(_options.RequestTimeout);
 
@@ -157,7 +161,8 @@ public sealed class NodeLanguageModel : ILanguageModel
 
         if (answer is null)
         {
-            await foreach (ModelStreamEvent streamed in fallback!.StreamAsync(request, ct).ConfigureAwait(false))
+            await foreach (ModelStreamEvent streamed in fallback!
+                .StreamAsync(request.For(fallback.Descriptor.Capabilities), ct).ConfigureAwait(false))
                 yield return streamed;
 
             yield break;

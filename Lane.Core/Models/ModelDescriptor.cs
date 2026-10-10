@@ -15,7 +15,8 @@ public enum ModelCapabilities
     PromptCaching    = 1 << 4,
     StructuredOutput = 1 << 5,
     StopSequences    = 1 << 6,
-    Thinking         = 1 << 7
+    Thinking         = 1 << 7,
+    Audio            = 1 << 8
 }
 
 /// <param name="InstanceId">The configured instance name — "haiku", "ds". Distinguishes two

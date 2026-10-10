@@ -25,24 +25,28 @@ public sealed class GitTool : Tool<GitTool.Args>
         [property: Description("For diff: limit to one path.")] string? Path = null,
         [property: Description("For log: how many commits.")] int Count = 15,
         [property: Description("For set_remote: an https URL for origin.")] string? Url = null,
-        [property: Description("For create_github_repo: make it public. It is private otherwise.")] bool Public = false);
+        [property: Description("For create_github_repo: make it public. It is private otherwise.")] bool Public = false,
+        [property: Description(
+            "The coding project to use, by the id list_coding_surfaces gives. Needed outside a coding session; " +
+            "left out in one, it is that session's own project.")]
+        string? Project = null);
 
     protected override string Name => "git";
 
     protected override string Description =>
-        "Use git in this coding session's repository, as yourself. Pushing, and creating a GitHub repository for " +
-        "it, use the configured GitHub token. " +
-        "There is no force-push, reset or clean.";
+        "Use git in a coding project's repository, as yourself: this coding session's own, or, from any other " +
+        "conversation, the one you name with project. Pushing, and creating a GitHub repository for it, use " +
+        "the configured GitHub token. There is no force-push, reset or clean.";
 
     protected override ToolSafety Safety => ToolSafety.Mutating;
 
     protected override TimeSpan Timeout => TimeSpan.FromMinutes(3);
 
-    protected override ToolAvailability Availability => Workspaces.InWorkspace;
+    protected override ToolAvailability Availability => Workspaces.InReplies;
 
     protected override async ValueTask<ToolResult> InvokeAsync(Args args, ToolContext context, CancellationToken ct)
     {
-        if (!Workspaces.TryResolve(context, out CodingWorkspace? workspace, out ToolResult? error)) return error;
+        if (!Workspaces.TryResolve(context, args.Project, out CodingWorkspace? workspace, out ToolResult? error)) return error;
 
         GitRunner git = workspace.Git;
 

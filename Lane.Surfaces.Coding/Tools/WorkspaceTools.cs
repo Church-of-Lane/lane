@@ -53,8 +53,8 @@ internal static class Openers
 {
     public static ToolAvailability Availability { get; } = new() { AllowedTurns = TurnKind.Monologue | TurnKind.Respond };
 
-    /// <summary>Null when the requester may open or close projects; otherwise the refusal.</summary>
-    public static ToolResult? Refusal(ToolContext context)
+    /// <summary>Null when the requester has an opener's rights; otherwise the refusal, worded with <paramref name="what"/>.</summary>
+    public static ToolResult? Refusal(ToolContext context, string what = "open or close coding projects")
     {
         if (context.Turn == TurnKind.Monologue) return null;
 
@@ -66,7 +66,7 @@ internal static class Openers
 
         return person is not null && options?.Openers.Contains(person, StringComparer.OrdinalIgnoreCase) == true
             ? null
-            : ToolResult.Error("Only the people listed in Lane:Coding:Openers can have you open or close coding projects.");
+            : ToolResult.Error($"Only the people listed in Lane:Coding:Openers can have you {what}.");
     }
 }
 

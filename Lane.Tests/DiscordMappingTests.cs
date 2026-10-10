@@ -435,4 +435,28 @@ public sealed class IdentityResolverTests
             "[file: notes.txt] https://cdn.discordapp.com/attachments/1/3/notes.txt",
             rendered);
     }
+
+    [Fact]
+    public void A_member_joining_is_read_as_a_notice()
+    {
+        Assert.Equal(
+            "[Alice joined the server]",
+            DiscordMapper.RenderSystemNotice(NetCord.MessageType.GuildMembedJoined, "Alice", ""));
+    }
+
+    [Fact]
+    public void A_new_thread_is_read_with_its_name()
+    {
+        Assert.Equal(
+            "[Alice started a thread: plans]",
+            DiscordMapper.RenderSystemNotice(NetCord.MessageType.ThreadCreated, "Alice", "plans"));
+    }
+
+    [Theory]
+    [InlineData(NetCord.MessageType.Default)]
+    [InlineData(NetCord.MessageType.Reply)]
+    public void Something_a_person_wrote_is_not_a_notice(NetCord.MessageType type)
+    {
+        Assert.Null(DiscordMapper.RenderSystemNotice(type, "Alice", "hello"));
+    }
 }

@@ -468,9 +468,15 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
         try
         {
             if (message.Author.Id == _client.Id) return;                       // her own words
-            if (message.Author.IsBot && !_options.RespondToBots) return;
 
-            if (_options.RequireOptIn && !message.Author.IsBot &&
+            string? notice = DiscordMapper.RenderSystemNotice(
+                message.Type,
+                DiscordMapper.DisplayNameOf(message.Author.GlobalName, message.Author.Username),
+                message.Content);
+
+            if (notice is null && message.Author.IsBot && !_options.RespondToBots) return;
+
+            if (notice is null && _options.RequireOptIn && !message.Author.IsBot &&
                 !await _consent.IsOptedInAsync(message.Author.Id, _lifetime?.Token ?? CancellationToken.None).ConfigureAwait(false))
             {
                 if (message.MentionedUsers.Any(u => u.Id == _client.Id) &&
@@ -488,7 +494,8 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
             bool isDirect = message.GuildId is null;
 
             if (isDirect && !_options.AllowDirectMessages) return;
-            if (!isDirect && !_options.Channels.Allows(message.ChannelId) && !await SponsoredAsync(message.ChannelId).ConfigureAwait(false))
+            if (!isDirect && !_options.Channels.Allows(message.ChannelId) &&
+                (notice is not null || !await SponsoredAsync(message.ChannelId).ConfigureAwait(false)))
                 return;
 
             Participant author = ToParticipant(message.Author);
@@ -506,12 +513,17 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
 
             Attach(descriptor.Id, message.ChannelId);
 
-            LaneMessage inbound = LaneMessage.User(
-                descriptor.Id,
-                author,
-                BuildContent(message, descriptor.Id, author),
-                message.CreatedAt,
-                message.Id.ToString());
+            LaneMessage inbound = notice is null
+                ? LaneMessage.User(
+                    descriptor.Id,
+                    author,
+                    BuildContent(message, descriptor.Id, author),
+                    message.CreatedAt,
+                    message.Id.ToString())
+                : LaneMessage.Observation(descriptor.Id, author, notice, message.CreatedAt) with
+                {
+                    ExternalId = message.Id.ToString()
+                };
 
             await _kernel.SubmitAsync(new InboundEvent
             {
@@ -522,7 +534,7 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
 
                 // Other bots are remembered but never answered, so two of them cannot get
                 // stuck talking to each other.
-                RequiresResponse = !message.Author.IsBot
+                RequiresResponse = notice is null && !message.Author.IsBot
             }, _lifetime?.Token ?? CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

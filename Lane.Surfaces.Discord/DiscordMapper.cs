@@ -1,5 +1,6 @@
 using Lane.Core.Identity;
 using Lane.Core.Sessions;
+using NetCord;
 
 namespace Lane.Surfaces.Discord;
 
@@ -128,6 +129,28 @@ internal static class DiscordMapper
 
         return (text, null);
     }
+
+    /// <summary>
+    /// A system message as the line Discord shows for it, or null for a message somebody wrote.
+    /// These arrive with the member as author and no content of their own.
+    /// </summary>
+    public static string? RenderSystemNotice(MessageType type, string author, string? content) => type switch
+    {
+        MessageType.GuildMembedJoined => $"[{author} joined the server]",
+
+        MessageType.PremiumGuildSubscription or
+        MessageType.PremiumGuildSubscriptionTier1 or
+        MessageType.PremiumGuildSubscriptionTier2 or
+        MessageType.PremiumGuildSubscriptionTier3 => $"[{author} boosted the server]",
+
+        MessageType.MessagePinned => $"[{author} pinned a message]",
+
+        MessageType.ThreadCreated => string.IsNullOrWhiteSpace(content)
+            ? $"[{author} started a thread]"
+            : $"[{author} started a thread: {content.Trim()}]",
+
+        _ => null
+    };
 
     /// <summary>One line per attachment, so the url of an image or file is something she can quote and pass on.</summary>
     public static string RenderAttachments(IReadOnlyList<(string FileName, string Url, string? ContentType)> attachments)

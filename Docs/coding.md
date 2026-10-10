@@ -56,7 +56,7 @@ Coding is off until `Lane:Coding:Enabled` is true.
 | `MaxBudgetUsd` | Passed to Claude Code as `--max-budget-usd`, per process. `0` means no cap. |
 | `MaxUnattendedExchanges` | How many Claude Code replies Lane is handed in a row, with nobody else speaking, before the conversation pauses. |
 | `AutoAllow`, `AlwaysDeny` | Claude Code permission rules, passed as `--allowedTools` and `--disallowedTools`. Leave a list out to get its default; write `[]` to empty it. |
-| `Openers` | Global user ids who may ask Lane in conversation to open or close projects. Empty means only her monologue can. |
+| `Openers` | Global user ids who may ask Lane in conversation to open or close projects, or to use `git` on a project from another conversation. Empty means only her monologue can open and close them. |
 | `AnyoneMayOpen` | Anyone may ask Lane in conversation to open or close projects, and she decides whether to. `Openers` is then ignored. |
 | `PassEnvironment` | Variables Claude Code may inherit even though their names look like secrets. Every other inherited variable whose name contains `KEY`, `TOKEN`, `SECRET` or `PASSWORD` is removed before Claude Code starts. |
 
@@ -88,12 +88,16 @@ have happen without anyone looking, and keep `AlwaysDeny` firm.
 | `claude_interrupt` | coding conversations | Stops Claude Code's current turn. |
 | `claude_new_session` | coding conversations | Ends the Claude Code conversation and starts a fresh one, optionally with an opening message. |
 | `answer_claude_permission` | coding conversations | Allows or denies a permission request by its id. |
-| `git` | coding conversations | `status`, `diff`, `log`, `commit` (stages everything first), `branches`, `switch`, `pull`, `push`, `set_remote`, `create_github_repo`. There is no force-push, reset or clean. |
+| `git` | coding conversations, and replies anywhere that name a project | `status`, `diff`, `log`, `commit` (stages everything first), `branches`, `switch`, `pull`, `push`, `set_remote`, `create_github_repo`. There is no force-push, reset or clean. |
 | `github_issues` | coding conversations | Lists a repository's issues or views one with its comments. Needs a token and a GitHub `origin`. |
 | `restart_self` | Lane's own workspace | Rebuilds Lane and restarts her onto the new build, only if the build succeeds. |
 | `list_coding_surfaces` | monologue and replies | Lists the open projects, with their conversations and Claude Code's state, and the closed ones that can be reopened by name. |
 | `open_coding_surface` | monologue, and replies to `Openers` (or anyone, with `AnyoneMayOpen`) | Opens a project by name: creates it, reopens it, or finds it already open. An optional brief is sent to Claude Code straight away. |
 | `close_coding_surface` | monologue, and replies to `Openers` (or anyone, with `AnyoneMayOpen`) | Ends a project's conversation. Its directory is kept. |
+
+In a coding conversation `git` works on that conversation's project. In a reply anywhere else, Lane names the project
+with `project`, using the id `list_coding_surfaces` gives; this is only done for the people in `Openers` (or anyone,
+with `AnyoneMayOpen`).
 
 The monologue sees coding conversations in its list of open conversations, and can also brief Claude Code by speaking
 into one with `speak_to_session`.

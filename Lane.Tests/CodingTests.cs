@@ -591,8 +591,9 @@ public sealed class OpenCodingSurfaceToolTests
 
         public IReadOnlyCollection<CodingWorkspace> All => Open;
         public IReadOnlyList<string> Closed { get; init; } = [];
-        public bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace) { workspace = null; return false; }
-        public CodingWorkspace? Find(string id) => null;
+        public bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace) =>
+            (workspace = Open.FirstOrDefault(w => w.SurfaceId == surface)) is not null;
+        public CodingWorkspace? Find(string id) => Open.FirstOrDefault(w => w.Id == id);
         public Task<bool> CloseAsync(string id, CancellationToken ct) => Task.FromResult(true);
         public void NoteHumanActivity(SessionId session) { }
         public IReadOnlyList<PermissionRequest> PendingPermissions(string id) => [];
@@ -725,6 +726,119 @@ public sealed class OpenCodingSurfaceToolTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Equal(["Game"], workspaces.Opened);
+    }
+
+    /// <summary>A project called "game" with one commit, open in <paramref name="workspaces"/>.</summary>
+    private static async Task<CodingWorkspace> OpenGameAsync(FakeWorkspaces workspaces, string dir)
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+        GitRunner git = new(dir, "Lane <lane@example.com>", null);
+
+        Assert.True((await git.RunAsync(ct, "init", "-b", "main")).Succeeded);
+        await File.WriteAllTextAsync(Path.Combine(dir, "a.txt"), "hello", ct);
+        Assert.True((await git.RunAsync(ct, "add", "-A")).Succeeded);
+        Assert.True((await git.RunAsync(ct, "commit", "-m", "First")).Succeeded);
+
+        CodingWorkspace workspace = new()
+        {
+            Id = "game", Name = "Game", Path = dir, Claude = new CodingSurfaceTests.RecordingClaude(), Git = git
+        };
+
+        workspaces.Open.Add(workspace);
+
+        return workspace;
+    }
+
+    [Fact]
+    public void Git_is_offered_in_replies_outside_coding_conversations()
+    {
+        ToolAvailability availability = new GitTool().Descriptor.Availability;
+
+        Assert.Null(availability.RequiredSessionTag);
+        Assert.Equal(TurnKind.Respond, availability.AllowedTurns);
+    }
+
+    [Fact]
+    public async Task Git_works_from_another_conversation_when_an_opener_names_the_project()
+    {
+        string dir = Directory.CreateTempSubdirectory("lane-git-tool-").FullName;
+
+        try
+        {
+            (_, ToolContext context, FakeWorkspaces workspaces, _) = Build(TurnKind.Respond, "jahan", "jahan");
+            await OpenGameAsync(workspaces, dir);
+
+            ToolResult named = await Invoke(new GitTool(), context, new { action = "log", project = "game" });
+            ToolResult bySurface = await Invoke(new GitTool(), context, new { action = "log", project = "coding.game" });
+
+            Assert.False(named.IsError, named.Text);
+            Assert.Contains("First", named.Text);
+            Assert.False(bySurface.IsError, bySurface.Text);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Git_from_another_conversation_needs_a_project_that_is_open_and_an_opener()
+    {
+        string dir = Directory.CreateTempSubdirectory("lane-git-tool-").FullName;
+
+        try
+        {
+            (_, ToolContext opener, FakeWorkspaces workspaces, _) = Build(TurnKind.Respond, "jahan", "jahan");
+            await OpenGameAsync(workspaces, dir);
+
+            ToolResult unnamed = await Invoke(new GitTool(), opener, new { action = "log" });
+            ToolResult unknown = await Invoke(new GitTool(), opener, new { action = "log", project = "nope" });
+
+            Assert.True(unnamed.IsError);
+            Assert.Contains("Name the project", unnamed.Text);
+            Assert.True(unknown.IsError);
+            Assert.Contains("No coding project 'nope'", unknown.Text);
+
+            (_, ToolContext stranger, FakeWorkspaces others, _) = Build(TurnKind.Respond, "stranger", "jahan");
+            others.Open.AddRange(workspaces.Open);
+
+            ToolResult refused = await Invoke(new GitTool(), stranger, new { action = "log", project = "game" });
+
+            Assert.True(refused.IsError);
+            Assert.Contains("Openers", refused.Text);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Git_in_a_coding_conversation_still_uses_its_own_project_for_anyone()
+    {
+        string dir = Directory.CreateTempSubdirectory("lane-git-tool-").FullName;
+
+        try
+        {
+            (_, ToolContext context, FakeWorkspaces workspaces, _) = Build(TurnKind.Respond, "stranger", "jahan");
+            CodingWorkspace workspace = await OpenGameAsync(workspaces, dir);
+
+            context = context with
+            {
+                Descriptor = new SessionDescriptor { Id = workspace.SessionId, DisplayName = "Game", MemoryGroup = "coding.game" }
+            };
+
+            ToolResult own = await Invoke(new GitTool(), context, new { action = "log" });
+            ToolResult ownByName = await Invoke(new GitTool(), context, new { action = "log", project = "game" });
+
+            Assert.False(own.IsError, own.Text);
+            Assert.Contains("First", own.Text);
+            Assert.False(ownByName.IsError, ownByName.Text);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }
 

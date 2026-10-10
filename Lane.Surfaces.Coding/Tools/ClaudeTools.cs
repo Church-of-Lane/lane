@@ -15,6 +15,9 @@ internal static class Workspaces
     public static ToolAvailability InWorkspace { get; } =
         new() { RequiredSessionTag = CodingSurface.WorkspaceTag, AllowedTurns = TurnKind.Respond };
 
+    /// <summary>Replies anywhere. Outside a coding conversation the call has to name its project.</summary>
+    public static ToolAvailability InReplies { get; } = new() { AllowedTurns = TurnKind.Respond };
+
     public static bool TryResolve(
         ToolContext context, [NotNullWhen(true)] out CodingWorkspace? workspace, [NotNullWhen(false)] out ToolResult? error)
     {
@@ -29,6 +32,54 @@ internal static class Workspaces
             return false;
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// The project named by <paramref name="project"/>, or this conversation's own when none is named. Reaching a
+    /// project from outside its conversation is held to the same people as opening one.
+    /// </summary>
+    public static bool TryResolve(
+        ToolContext context, string? project,
+        [NotNullWhen(true)] out CodingWorkspace? workspace, [NotNullWhen(false)] out ToolResult? error)
+    {
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            if (TryResolve(context, out workspace, out error)) return true;
+
+            error = ToolResult.Error(
+                "This conversation is not a coding session. Name the project to use; list_coding_surfaces shows them.");
+            return false;
+        }
+
+        workspace = null;
+
+        string id = project.Trim();
+
+        if (id.StartsWith(CodingWorkspace.SurfacePrefix, StringComparison.OrdinalIgnoreCase))
+            id = id[CodingWorkspace.SurfacePrefix.Length..];
+
+        if (context.Services.GetService<ICodingWorkspaces>() is not { } workspaces)
+        {
+            error = ToolResult.Error("Coding is not enabled.");
+            return false;
+        }
+
+        if (workspaces.Find(id) is not { } found)
+        {
+            error = ToolResult.Error($"No coding project '{id}' is open. list_coding_surfaces shows the ones that are.");
+            return false;
+        }
+
+        if (context.Descriptor?.Id.Surface != found.SurfaceId &&
+            Openers.Refusal(context, "use a coding project from another conversation") is { } refusal)
+        {
+            error = refusal;
+            return false;
+        }
+
+        workspace = found;
+        error     = null;
         return true;
     }
 }

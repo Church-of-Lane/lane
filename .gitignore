@@ -14,3 +14,8 @@ Wizard/Books/*
 *.txt
 
 artifacts/
+
+nohup.out
+._*
+**/bin/
+**/obj/

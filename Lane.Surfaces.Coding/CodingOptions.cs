@@ -17,6 +17,12 @@ public sealed class CodingOptions
     /// <summary>Resolved from <see cref="GitHubTokenRef"/> at composition.</summary>
     public string? GitHubToken { get; set; }
 
+    /// <summary>Token references by GitHub organisation, used instead of <see cref="GitHubTokenRef"/> for its repositories.</summary>
+    public Dictionary<string, string> GitHubOrgTokenRefs { get; set; } = [];
+
+    /// <summary>Resolved from <see cref="GitHubOrgTokenRefs"/> at composition.</summary>
+    public Dictionary<string, string> GitHubOrgTokens { get; set; } = [];
+
     /// <summary>"Name &lt;email&gt;", used for Lane's own commits.</summary>
     public string GitAuthor { get; set; } = "Lane <lane@localhost>";
 

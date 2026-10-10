@@ -6,32 +6,43 @@ namespace Lane.Surfaces.Coding.Git;
 
 /// <summary>
 /// The <c>git</c> CLI in one directory, as Lane. A GitHub token goes through <c>GIT_CONFIG_*</c>
-/// environment variables, never argv or <c>.git/config</c>.
+/// environment variables, never argv or <c>.git/config</c>. Which token is decided by who owns <c>origin</c>.
 /// </summary>
 public sealed partial class GitRunner(
     string directory,
     string author,
-    string? gitHubToken,
+    GitHubTokens? gitHubTokens,
     IProcessRunner? runner = null)
 {
     private readonly IProcessRunner _runner = runner ?? ProcessRunner.Instance;
 
     public string Directory => directory;
 
-    public bool HasToken => !string.IsNullOrWhiteSpace(gitHubToken);
+    public async Task<ProcessResult> RunAsync(CancellationToken ct, params string[] args) =>
+        await RunAsync(await TokenAsync(ct).ConfigureAwait(false), ct, args).ConfigureAwait(false);
 
-    public Task<ProcessResult> RunAsync(CancellationToken ct, params string[] args) =>
+    private Task<ProcessResult> RunAsync(string? token, CancellationToken ct, params string[] args) =>
         _runner.RunAsync(new ProcessSpec
         {
             FileName         = "git",
             Arguments        = args,
             WorkingDirectory = directory,
-            Environment      = Environment(),
+            Environment      = Environment(token),
             Timeout          = TimeSpan.FromMinutes(2),
             MaxOutput        = 24_000
         }, ct);
 
-    internal IReadOnlyDictionary<string, string?> Environment()
+    /// <summary>The token for whoever owns <c>origin</c> on GitHub, or the default one.</summary>
+    internal async Task<string?> TokenAsync(CancellationToken ct)
+    {
+        if (gitHubTokens is null) return null;
+
+        if (!gitHubTokens.VaryByOwner) return gitHubTokens.For(null);
+
+        return gitHubTokens.For(GitHubClient.ParseRemote(await OriginAsync(ct).ConfigureAwait(false))?.Owner);
+    }
+
+    internal IReadOnlyDictionary<string, string?> Environment(string? token)
     {
         (string name, string email) = ParseAuthor(author);
 
@@ -44,9 +55,9 @@ public sealed partial class GitRunner(
             ["GIT_COMMITTER_EMAIL"] = email
         };
 
-        if (HasToken)
+        if (token is not null)
         {
-            string basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{gitHubToken}"));
+            string basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
 
             env["GIT_CONFIG_COUNT"]   = "1";
             env["GIT_CONFIG_KEY_0"]   = "http.https://github.com/.extraheader";
@@ -68,7 +79,7 @@ public sealed partial class GitRunner(
     /// <summary>The origin remote's URL, or null when there is none.</summary>
     public async Task<string?> OriginAsync(CancellationToken ct)
     {
-        ProcessResult result = await RunAsync(ct, "remote", "get-url", "origin").ConfigureAwait(false);
+        ProcessResult result = await RunAsync(null, ct, "remote", "get-url", "origin").ConfigureAwait(false);
 
         return result.Succeeded ? result.Output.Trim() : null;
     }

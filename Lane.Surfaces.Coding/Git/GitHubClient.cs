@@ -11,8 +11,8 @@ public sealed record GitHubRepository(string Owner, string Name)
     public override string ToString() => $"{Owner}/{Name}";
 }
 
-/// <summary>Reads a repository's issues and creates repositories, with a personal access token.</summary>
-public sealed partial class GitHubClient(HttpClient http, string token)
+/// <summary>Reads a repository's issues and creates repositories, with the personal access token for its owner.</summary>
+public sealed partial class GitHubClient(HttpClient http, GitHubTokens tokens)
 {
     public const string HttpClientName = "lane-github";
 
@@ -36,7 +36,7 @@ public sealed partial class GitHubClient(HttpClient http, string token)
 
         if (!string.IsNullOrWhiteSpace(labels)) query += $"&labels={Uri.EscapeDataString(labels)}";
 
-        using JsonDocument doc = await GetAsync($"repos/{repo}/issues?{query}", ct).ConfigureAwait(false);
+        using JsonDocument doc = await GetAsync($"repos/{repo}/issues?{query}", repo.Owner, ct).ConfigureAwait(false);
 
         StringBuilder sb = new();
 
@@ -62,7 +62,7 @@ public sealed partial class GitHubClient(HttpClient http, string token)
 
     public async Task<string> ViewIssueAsync(GitHubRepository repo, int number, CancellationToken ct)
     {
-        using JsonDocument issue = await GetAsync($"repos/{repo}/issues/{number}", ct).ConfigureAwait(false);
+        using JsonDocument issue = await GetAsync($"repos/{repo}/issues/{number}", repo.Owner, ct).ConfigureAwait(false);
 
         JsonElement root = issue.RootElement;
 
@@ -77,7 +77,7 @@ public sealed partial class GitHubClient(HttpClient http, string token)
 
         if (root.GetProperty("comments").GetInt32() > 0)
         {
-            using JsonDocument comments = await GetAsync($"repos/{repo}/issues/{number}/comments?per_page=20", ct)
+            using JsonDocument comments = await GetAsync($"repos/{repo}/issues/{number}/comments?per_page=20", repo.Owner, ct)
                 .ConfigureAwait(false);
 
             foreach (JsonElement comment in comments.RootElement.EnumerateArray())
@@ -99,7 +99,7 @@ public sealed partial class GitHubClient(HttpClient http, string token)
 
         if (owner is not null)
         {
-            using JsonDocument user = await GetAsync("user", ct).ConfigureAwait(false);
+            using JsonDocument user = await GetAsync("user", owner, ct).ConfigureAwait(false);
 
             if (!string.Equals(user.RootElement.GetProperty("login").GetString(), owner, StringComparison.OrdinalIgnoreCase))
                 path = $"orgs/{Uri.EscapeDataString(owner)}/repos";
@@ -114,17 +114,21 @@ public sealed partial class GitHubClient(HttpClient http, string token)
             body["description"] = flat.Length <= MaxDescription ? flat : flat[..MaxDescription];
         }
 
-        using JsonDocument created = await SendAsync(HttpMethod.Post, path, body, ct).ConfigureAwait(false);
+        using JsonDocument created = await SendAsync(HttpMethod.Post, path, body, owner, ct).ConfigureAwait(false);
 
         return new GitHubRepository(
             created.RootElement.GetProperty("owner").GetProperty("login").GetString()!,
             created.RootElement.GetProperty("name").GetString()!);
     }
 
-    private Task<JsonDocument> GetAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Get, path, null, ct);
+    private Task<JsonDocument> GetAsync(string path, string? owner, CancellationToken ct) =>
+        SendAsync(HttpMethod.Get, path, null, owner, ct);
 
-    private async Task<JsonDocument> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(HttpMethod method, string path, object? body, string? owner, CancellationToken ct)
     {
+        string token = tokens.For(owner) ?? throw new GitHubException(
+            owner is null ? "No GitHub token is configured for your own account." : $"No GitHub token is configured for {owner}.");
+
         using HttpRequestMessage request = new(method, new Uri(new Uri("https://api.github.com/"), path));
 
         if (body is not null)

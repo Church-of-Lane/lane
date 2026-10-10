@@ -157,6 +157,11 @@ public static class LaneHostBuilderExtensions
 
         options.GitHubToken = secrets.Resolve(options.GitHubTokenRef);
 
+        options.GitHubOrgTokens = [];
+
+        foreach ((string org, string reference) in options.GitHubOrgTokenRefs)
+            if (secrets.Resolve(reference) is { Length: > 0 } token) options.GitHubOrgTokens[org] = token;
+
         foreach (CodingWorkspaceOptions workspace in options.Workspaces)
             workspace.GitHubToken = secrets.Resolve(workspace.GitHubTokenRef);
 

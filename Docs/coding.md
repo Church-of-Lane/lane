@@ -32,6 +32,7 @@ Coding is off until `Lane:Coding:Enabled` is true.
   "Model": null,                        // passed to --model when set, e.g. "sonnet"
   "WorkspacesRoot": "~/lane-workspaces",
   "GitHubTokenRef": "env:GITHUB_TOKEN",
+  "GitHubOrgTokenRefs": { "my-org": "env:GITHUB_TOKEN_MY_ORG" },
   "GitAuthor": "Lane <lane@localhost>",
   "PermissionPort": 5085,
   "PermissionTimeout": "00:10:00",
@@ -52,7 +53,8 @@ Coding is off until `Lane:Coding:Enabled` is true.
 |---|---|
 | `Workspaces[].Id` | Letters, digits, `-` and `_`. The conversation is `coding.{Id}/Text/claude`. |
 | `Workspaces[].SelfHosted` | This directory is Lane's own source. Enables `restart_self`. |
-| `Workspaces[].GitHubTokenRef` | Overrides the global token for this workspace. Projects Lane opens use the global one. |
+| `Workspaces[].GitHubTokenRef` | The only token this workspace uses, in place of the global one and the organisation ones. Projects Lane opens use the global ones. |
+| `GitHubOrgTokenRefs` | A token for each GitHub organisation, or other account, named here. It is used in place of `GitHubTokenRef` for that owner's repositories. |
 | `MaxBudgetUsd` | Passed to Claude Code as `--max-budget-usd`, per process. `0` means no cap. |
 | `MaxUnattendedExchanges` | How many Claude Code replies Lane is handed in a row, with nobody else speaking, before the conversation pauses. |
 | `AutoAllow`, `AlwaysDeny` | Claude Code permission rules, passed as `--allowedTools` and `--disallowedTools`. Leave a list out to get its default; write `[]` to empty it. |
@@ -119,6 +121,10 @@ variables, so it is never written to `.git/config` or visible in the process lis
 
 For a fine-grained token, grant **Contents: read and write** to push and **Issues: read** to read issues, on the
 repositories Lane should reach. A classic token needs `repo`.
+
+A fine-grained token only reaches the repositories of one owner, so an organisation usually needs a token of its own.
+Name it in `GitHubOrgTokenRefs` and Lane uses it whenever a project's `origin` belongs to that organisation: to push
+and pull, to read its issues, and to create a repository there. Every other owner gets `GitHubTokenRef`.
 
 `git` with `create_github_repo` makes a new GitHub repository for a project that has no `origin` yet, sets it as
 `origin` and pushes the current branch. The repository is private unless Lane asks for a public one, is named after

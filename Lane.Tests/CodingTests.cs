@@ -952,9 +952,9 @@ public sealed class GitTests : IDisposable
     [Fact]
     public void The_token_travels_in_the_environment_not_the_arguments()
     {
-        GitRunner git = new(_dir, "Lane <lane@example.com>", "ghp_secret");
+        GitRunner git = new(_dir, "Lane <lane@example.com>", new GitHubTokens("ghp_secret"));
 
-        IReadOnlyDictionary<string, string?> env = git.Environment();
+        IReadOnlyDictionary<string, string?> env = git.Environment("ghp_secret");
 
         string header = env["GIT_CONFIG_VALUE_0"]!;
         string encoded = header["AUTHORIZATION: basic ".Length..];
@@ -964,7 +964,24 @@ public sealed class GitTests : IDisposable
         Assert.Equal("Lane", env["GIT_AUTHOR_NAME"]);
         Assert.Equal("lane@example.com", env["GIT_COMMITTER_EMAIL"]);
 
-        Assert.False(new GitRunner(_dir, "Lane", null).Environment().ContainsKey("GIT_CONFIG_COUNT"));
+        Assert.False(new GitRunner(_dir, "Lane", null).Environment(null).ContainsKey("GIT_CONFIG_COUNT"));
+    }
+
+    [Fact]
+    public async Task The_token_is_chosen_by_who_owns_origin()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+        GitHubTokens tokens = new("ghp_mine", new Dictionary<string, string> { ["Acme"] = "ghp_acme" });
+        GitRunner git = new(_dir, "Lane <lane@example.com>", tokens);
+
+        Assert.True((await git.RunAsync(ct, "init", "-b", "main")).Succeeded);
+        Assert.Equal("ghp_mine", await git.TokenAsync(ct));
+
+        Assert.True((await git.RunAsync(ct, "remote", "add", "origin", "https://github.com/acme/game.git")).Succeeded);
+        Assert.Equal("ghp_acme", await git.TokenAsync(ct));
+
+        Assert.True((await git.RunAsync(ct, "remote", "set-url", "origin", "https://github.com/jahan/game.git")).Succeeded);
+        Assert.Equal("ghp_mine", await git.TokenAsync(ct));
     }
 
     [Fact]
@@ -1031,7 +1048,7 @@ public sealed class GitHubClientTests
             ]
             """);
 
-        GitHubClient client = new(new HttpClient(handler), "ghp_x");
+        GitHubClient client = new(new HttpClient(handler), new GitHubTokens("ghp_x"));
 
         string text = await client.ListIssuesAsync(Repo, "open", "bug", 10, TestContext.Current.CancellationToken);
 
@@ -1044,11 +1061,32 @@ public sealed class GitHubClientTests
     }
 
     [Fact]
+    public async Task An_organisations_repositories_use_its_own_token()
+    {
+        CancellationToken ct = TestContext.Current.CancellationToken;
+        Handler handler = new(HttpStatusCode.OK, "[]");
+
+        GitHubClient client = new(
+            new HttpClient(handler), new GitHubTokens("ghp_x", new Dictionary<string, string> { ["acme"] = "ghp_acme" }));
+
+        await client.ListIssuesAsync(new GitHubRepository("Acme", "game"), "open", null, 10, ct);
+        await client.ListIssuesAsync(Repo, "open", null, 10, ct);
+
+        Assert.Equal(["ghp_acme", "ghp_x"], handler.Requests.Select(r => r.Headers.Authorization?.Parameter));
+
+        GitHubClient orgOnly = new(new HttpClient(handler), new GitHubTokens(null, new Dictionary<string, string> { ["acme"] = "ghp_acme" }));
+
+        GitHubException ex = await Assert.ThrowsAsync<GitHubException>(() => orgOnly.ListIssuesAsync(Repo, "open", null, 10, ct));
+
+        Assert.Contains("No GitHub token is configured for jahan", ex.Message);
+    }
+
+    [Fact]
     public async Task A_repository_is_created_private_in_the_tokens_own_account()
     {
         Handler handler = new(HttpStatusCode.Created, """{"name":"tiny-game","owner":{"login":"jahan"}}""");
 
-        GitHubClient client = new(new HttpClient(handler), "ghp_x");
+        GitHubClient client = new(new HttpClient(handler), new GitHubTokens("ghp_x"));
 
         GitHubRepository created = await client.CreateRepositoryAsync(
             null, "tiny-game", "A game\nabout tiny things.", isPrivate: true, TestContext.Current.CancellationToken);
@@ -1069,7 +1107,7 @@ public sealed class GitHubClientTests
     public async Task A_refused_repository_says_why()
     {
         GitHubClient client = new(new HttpClient(new Handler(HttpStatusCode.UnprocessableEntity,
-            """{"message":"Repository creation failed.","errors":[{"message":"name already exists on this account"}]}""")), "ghp_x");
+            """{"message":"Repository creation failed.","errors":[{"message":"name already exists on this account"}]}""")), new GitHubTokens("ghp_x"));
 
         GitHubException ex = await Assert.ThrowsAsync<GitHubException>(() =>
             client.CreateRepositoryAsync(null, "lane", null, true, TestContext.Current.CancellationToken));
@@ -1080,7 +1118,7 @@ public sealed class GitHubClientTests
     [Fact]
     public async Task A_missing_repository_is_explained()
     {
-        GitHubClient client = new(new HttpClient(new Handler(HttpStatusCode.NotFound, "{}")), "ghp_x");
+        GitHubClient client = new(new HttpClient(new Handler(HttpStatusCode.NotFound, "{}")), new GitHubTokens("ghp_x"));
 
         GitHubException ex = await Assert.ThrowsAsync<GitHubException>(() =>
             client.ListIssuesAsync(Repo, "open", null, 10, TestContext.Current.CancellationToken));
@@ -1110,6 +1148,15 @@ public sealed class CodingConfigurationTests
 
         Assert.Empty(emptied.AutoAllow);
         Assert.Equal(["Bash(sudo *)"], emptied.AlwaysDeny);
+    }
+
+    [Fact]
+    public void Organisation_token_references_are_resolved_and_missing_ones_dropped()
+    {
+        CodingOptions options = LaneHostBuilderExtensions.ReadCodingOptions(Section(
+            """{"Coding":{"GitHubOrgTokenRefs":{"acme":"ghp_acme","other":"env:LANE_TEST_TOKEN_THAT_IS_NOT_SET"}}}"""));
+
+        Assert.Equal("ghp_acme", Assert.Single(options.GitHubOrgTokens).Value);
     }
 
     [Fact]

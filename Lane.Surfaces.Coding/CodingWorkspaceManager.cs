@@ -65,6 +65,7 @@ public sealed partial class CodingWorkspaceManager(
     private readonly ConcurrentDictionary<string, CodingWorkspace> _workspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _opening = new(1, 1);
     private readonly ILogger _log = loggers.CreateLogger<CodingWorkspaceManager>();
+    private readonly GitHubTokens _gitHubTokens = new(options.GitHubToken, options.GitHubOrgTokens);
 
     public IReadOnlyCollection<CodingWorkspace> All => [.. _workspaces.Values.OrderBy(w => w.Id, StringComparer.Ordinal)];
 
@@ -122,7 +123,7 @@ public sealed partial class CodingWorkspaceManager(
             await StartWorkspaceAsync(Build(
                 configured.Id, configured.Name ?? configured.Id, path, configured.Purpose,
                 configured.SelfHosted, dynamic: false,
-                configured.GitHubToken ?? options.GitHubToken, configured.Model), ct).ConfigureAwait(false);
+                configured.GitHubToken is { Length: > 0 } own ? new GitHubTokens(own) : _gitHubTokens, configured.Model), ct).ConfigureAwait(false);
         }
 
         foreach (string key in await store.ListKeysAsync(Scope, WorkspacePrefix, ct).ConfigureAwait(false))
@@ -139,7 +140,7 @@ public sealed partial class CodingWorkspaceManager(
 
             await StartWorkspaceAsync(Build(
                 record.Id, record.Name, record.Path, record.Purpose,
-                selfHosted: false, dynamic: true, options.GitHubToken, model: null), ct).ConfigureAwait(false);
+                selfHosted: false, dynamic: true, _gitHubTokens, model: null), ct).ConfigureAwait(false);
         }
 
         if (!_workspaces.IsEmpty)
@@ -185,7 +186,7 @@ public sealed partial class CodingWorkspaceManager(
             }
 
             CodingWorkspace workspace = Build(
-                id, name.Trim(), path, purpose, selfHosted: false, dynamic: true, options.GitHubToken, model: null);
+                id, name.Trim(), path, purpose, selfHosted: false, dynamic: true, _gitHubTokens, model: null);
 
             if (outcome == OpeningOutcome.Created) await InitialiseRepositoryAsync(workspace, remote, ct).ConfigureAwait(false);
 
@@ -250,7 +251,7 @@ public sealed partial class CodingWorkspaceManager(
 
     private CodingWorkspace Build(
         string id, string name, string path, string? purpose,
-        bool selfHosted, bool dynamic, string? gitHubToken, string? model)
+        bool selfHosted, bool dynamic, GitHubTokens gitHubTokens, string? model)
     {
         ClaudeLaunchSettings launch = new()
         {
@@ -277,10 +278,10 @@ public sealed partial class CodingWorkspaceManager(
             Dynamic    = dynamic,
             Claude     = new ClaudeCodeProcess(
                 launch, new StoredClaudeSession(store, SessionPrefix + id), loggers.CreateLogger($"Lane.Coding.{id}")),
-            Git        = new GitRunner(path, options.GitAuthor, gitHubToken),
-            GitHub     = string.IsNullOrWhiteSpace(gitHubToken)
-                ? null
-                : new GitHubClient(http.CreateClient(GitHubClient.HttpClientName), gitHubToken)
+            Git        = new GitRunner(path, options.GitAuthor, gitHubTokens),
+            GitHub     = gitHubTokens.Any
+                ? new GitHubClient(http.CreateClient(GitHubClient.HttpClientName), gitHubTokens)
+                : null
         };
     }
 

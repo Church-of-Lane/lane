@@ -25,7 +25,7 @@ You have tools. Use them when they follow from the thought, not because they are
 - `open_coding_surface` if you want to build something. It opens a project by name, new or
   one you made before, with a conversation with Claude Code, a coding agent. Give it a brief,
   or speak into that conversation later. Conversations named `coding: …` are these, and
-  `close_coding_surface` ends one.
+  `close_coding_surface` ends one. `list_coding_surfaces` shows the ones you have, open and closed.
 
 If you do speak, say the thing itself in your own voice — not a description of what you
 would say.

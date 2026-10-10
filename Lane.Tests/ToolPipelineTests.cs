@@ -49,6 +49,9 @@ public sealed class ToolPipelineTests
             ValueTask.FromResult<IReadOnlyList<ITool>>([tool]);
     }
 
+    private static ModelResponse WithText(string text, ModelResponse response) =>
+        response with { Content = [new TextPart(text), .. response.Content] };
+
     private static MemoryHandlerOptions Recent() => new()
     {
         Id = "recent", Type = "SlidingWindow", Scope = MemoryScope.Session,
@@ -196,6 +199,29 @@ public sealed class ToolPipelineTests
         // The advertised set is fingerprinted into the cache lineage, so a change that
         // invalidates the prompt cache is visible rather than merely expensive.
         Assert.Contains("tools:", request.CacheLineage);
+    }
+
+    [Fact]
+    public async Task A_tool_call_splits_the_reply_into_separate_messages()
+    {
+        EchoTool tool = new("web_search");
+
+        ScriptedLanguageModel model = new((_, call) => call switch
+        {
+            0 => WithText("Let me look.", ScriptedLanguageModel.ToolCall("web_search", new { query = "tide pools" }, "c1")),
+            _ => ScriptedLanguageModel.Text("They're rocky shore habitats.")
+        });
+
+        await using LaneHarness harness = LaneHarness.Create(model, services =>
+            services.AddSingleton<IToolSource>(new Source(tool)));
+
+        RecordingChannel channel = harness.OpenSession("terminal", "local");
+
+        await harness.SendAsync(channel, "jahan", "what are tide pools?");
+
+        Assert.Equal(
+            ["Let me look.", "They're rocky shore habitats."],
+            await channel.WaitForAsync(2, Timeout));
     }
 
     [Fact]

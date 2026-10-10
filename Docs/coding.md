@@ -19,7 +19,7 @@ Coding surfaces come from two places:
 - The `claude` CLI, signed in. Claude Code runs headless (`claude -p`), using whichever login the machine has. To use
   an API key instead, put `ANTHROPIC_API_KEY` in Lane's environment; it is on the `PassEnvironment` list by default.
 - `git`.
-- A GitHub personal access token, only for pushing to GitHub and reading issues.
+- A GitHub personal access token, only for pushing to GitHub, creating repositories there and reading issues.
 
 ## Configuration
 
@@ -88,9 +88,10 @@ have happen without anyone looking, and keep `AlwaysDeny` firm.
 | `claude_interrupt` | coding conversations | Stops Claude Code's current turn. |
 | `claude_new_session` | coding conversations | Ends the Claude Code conversation and starts a fresh one, optionally with an opening message. |
 | `answer_claude_permission` | coding conversations | Allows or denies a permission request by its id. |
-| `git` | coding conversations | `status`, `diff`, `log`, `commit` (stages everything first), `branches`, `switch`, `pull`, `push`, `set_remote`. There is no force-push, reset or clean. |
+| `git` | coding conversations | `status`, `diff`, `log`, `commit` (stages everything first), `branches`, `switch`, `pull`, `push`, `set_remote`, `create_github_repo`. There is no force-push, reset or clean. |
 | `github_issues` | coding conversations | Lists a repository's issues or views one with its comments. Needs a token and a GitHub `origin`. |
 | `restart_self` | Lane's own workspace | Rebuilds Lane and restarts her onto the new build, only if the build succeeds. |
+| `list_coding_surfaces` | monologue and replies | Lists the open projects, with their conversations and Claude Code's state, and the closed ones that can be reopened by name. |
 | `open_coding_surface` | monologue, and replies to `Openers` (or anyone, with `AnyoneMayOpen`) | Opens a project by name: creates it, reopens it, or finds it already open. An optional brief is sent to Claude Code straight away. |
 | `close_coding_surface` | monologue, and replies to `Openers` (or anyone, with `AnyoneMayOpen`) | Ends a project's conversation. Its directory is kept. |
 
@@ -114,6 +115,12 @@ variables, so it is never written to `.git/config` or visible in the process lis
 
 For a fine-grained token, grant **Contents: read and write** to push and **Issues: read** to read issues, on the
 repositories Lane should reach. A classic token needs `repo`.
+
+`git` with `create_github_repo` makes a new GitHub repository for a project that has no `origin` yet, sets it as
+`origin` and pushes the current branch. The repository is private unless Lane asks for a public one, is named after
+the project unless she gives a name, and goes in the token's own account unless she names an organisation as
+`owner/name`. A fine-grained token needs **Administration: read and write** for this, with access to all repositories,
+since the new one does not exist yet to be selected.
 
 ## Watching from the dashboard
 

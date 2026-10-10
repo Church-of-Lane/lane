@@ -12,7 +12,8 @@ namespace Lane.Core.Pipeline.Stages;
 /// A line break is where Lane finished a thought, so that is where a message ends: each
 /// completed line goes out while the model is still producing the next, and a reply that
 /// came in three lines arrives as three messages rather than one wall of text after the
-/// turn is over.
+/// turn is over. A tool call ends a message the same way, so what was said before it does
+/// not run into what is said after.
 ///
 /// Sending is serialised behind one task — messages out of order read worse than messages
 /// arriving late — and one dead channel never stops the rest, exactly as <see cref="DeliveryStage"/>
@@ -50,7 +51,17 @@ public sealed class StreamingDeliveryObserver(
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask OnToolStartAsync(string name, CancellationToken ct) => ValueTask.CompletedTask;
+    /// <summary>Sends the unfinished line as its own message before the tool runs.</summary>
+    public ValueTask OnToolStartAsync(string name, CancellationToken ct)
+    {
+        // Tools of one step start concurrently.
+        lock (_lines)
+        {
+            if (_lines.Flush() is { } pending) Enqueue(pending);
+        }
+
+        return ValueTask.CompletedTask;
+    }
 
     public ValueTask OnToolEndAsync(string name, ToolResult result, CancellationToken ct)
     {

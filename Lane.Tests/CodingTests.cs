@@ -534,10 +534,12 @@ public sealed class CodingWorkspaceManagerTests : IDisposable
         await third.StartAsync(ct);
 
         Assert.Null(third.Find("a-tiny-game"));
+        Assert.Equal(["a-tiny-game"], third.Closed);
 
         CodingWorkspaceOpening back = await third.OpenAsync("A Tiny Game", "A game about tiny things.", null, ct);
 
         Assert.Equal(OpeningOutcome.Reopened, back.Outcome);
+        Assert.Empty(third.Closed);
         Assert.Equal("Lane Start A Tiny Game", (await back.Workspace.Git.RunAsync(ct, "log", "--format=%an %s")).Output.Trim());
     }
 
@@ -585,7 +587,10 @@ public sealed class OpenCodingSurfaceToolTests
     {
         public List<string> Opened { get; } = [];
 
-        public IReadOnlyCollection<CodingWorkspace> All => [];
+        public List<CodingWorkspace> Open { get; } = [];
+
+        public IReadOnlyCollection<CodingWorkspace> All => Open;
+        public IReadOnlyList<string> Closed { get; init; } = [];
         public bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace) { workspace = null; return false; }
         public CodingWorkspace? Find(string id) => null;
         public Task<bool> CloseAsync(string id, CancellationToken ct) => Task.FromResult(true);
@@ -684,6 +689,31 @@ public sealed class OpenCodingSurfaceToolTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Equal(["Game"], workspaces.Opened);
+    }
+
+    [Fact]
+    public async Task Listing_shows_open_projects_and_the_closed_ones_that_can_be_reopened()
+    {
+        FakeWorkspaces workspaces = new() { Closed = ["old-thing"] };
+
+        workspaces.Open.Add(new CodingWorkspace
+        {
+            Id = "game", Name = "Game", Path = "/w/game", Purpose = "A snake game.", Dynamic = true,
+            Claude = new CodingSurfaceTests.RecordingClaude(), Git = new GitRunner("/w/game", "Lane", null)
+        });
+
+        ToolContext context = new()
+        {
+            Turn     = TurnKind.Monologue,
+            Services = new ServiceCollection().AddSingleton<ICodingWorkspaces>(workspaces).BuildServiceProvider()
+        };
+
+        ToolResult result = await Invoke(new ListCodingSurfacesTool(), context, new { });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("game — Game, conversation coding.game/Text/claude, /w/game", result.Text);
+        Assert.Contains("A snake game.", result.Text);
+        Assert.Contains("Closed, reopened by name: old-thing", result.Text);
     }
 
     [Fact]
@@ -865,11 +895,13 @@ public sealed class GitHubClientTests
     private sealed class Handler(HttpStatusCode status, string body) : HttpMessageHandler
     {
         public List<HttpRequestMessage> Requests { get; } = [];
+        public List<string?> Bodies { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Requests.Add(request);
-            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+            Bodies.Add(request.Content is null ? null : await request.Content.ReadAsStringAsync(ct));
+            return new HttpResponseMessage(status) { Content = new StringContent(body) };
         }
     }
 
@@ -895,6 +927,40 @@ public sealed class GitHubClientTests
         Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
         Assert.Equal("ghp_x", request.Headers.Authorization?.Parameter);
         Assert.Contains("labels=bug", request.RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task A_repository_is_created_private_in_the_tokens_own_account()
+    {
+        Handler handler = new(HttpStatusCode.Created, """{"name":"tiny-game","owner":{"login":"jahan"}}""");
+
+        GitHubClient client = new(new HttpClient(handler), "ghp_x");
+
+        GitHubRepository created = await client.CreateRepositoryAsync(
+            null, "tiny-game", "A game\nabout tiny things.", isPrivate: true, TestContext.Current.CancellationToken);
+
+        Assert.Equal("jahan/tiny-game", created.ToString());
+
+        HttpRequestMessage request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("https://api.github.com/user/repos", request.RequestUri!.ToString());
+
+        using JsonDocument body = JsonDocument.Parse(handler.Bodies[0]!);
+        Assert.Equal("tiny-game", body.RootElement.GetProperty("name").GetString());
+        Assert.True(body.RootElement.GetProperty("private").GetBoolean());
+        Assert.Equal("A game about tiny things.", body.RootElement.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task A_refused_repository_says_why()
+    {
+        GitHubClient client = new(new HttpClient(new Handler(HttpStatusCode.UnprocessableEntity,
+            """{"message":"Repository creation failed.","errors":[{"message":"name already exists on this account"}]}""")), "ghp_x");
+
+        GitHubException ex = await Assert.ThrowsAsync<GitHubException>(() =>
+            client.CreateRepositoryAsync(null, "lane", null, true, TestContext.Current.CancellationToken));
+
+        Assert.Contains("name already exists on this account", ex.Message);
     }
 
     [Fact]

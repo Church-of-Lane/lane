@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using Lane.Core.Kernel;
 using Lane.Core.Lifecycle;
 using Lane.Core.Sessions;
@@ -66,6 +67,54 @@ internal static class Openers
         return person is not null && options?.Openers.Contains(person, StringComparer.OrdinalIgnoreCase) == true
             ? null
             : ToolResult.Error("Only the people listed in Lane:Coding:Openers can have you open or close coding projects.");
+    }
+}
+
+[LaneTool]
+public sealed class ListCodingSurfacesTool : Tool<NoArgs>
+{
+    protected override string Name => "list_coding_surfaces";
+
+    protected override string Description =>
+        "List your coding projects: the open ones, with their conversations and what Claude Code is doing in each, " +
+        "and the closed ones that open_coding_surface would bring back by name.";
+
+    protected override ToolAvailability Availability => Openers.Availability;
+
+    protected override ValueTask<ToolResult> InvokeAsync(NoArgs args, ToolContext context, CancellationToken ct)
+    {
+        ICodingWorkspaces? workspaces = context.Services.GetService<ICodingWorkspaces>();
+
+        if (workspaces is null) return ValueTask.FromResult(ToolResult.Error("Coding is not enabled."));
+
+        StringBuilder sb = new();
+
+        foreach (CodingWorkspace workspace in workspaces.All)
+        {
+            sb.Append(workspace.Id).Append(" — ").Append(workspace.Name)
+              .Append(", conversation ").Append(workspace.SessionId.Value)
+              .Append(", ").Append(workspace.Path)
+              .Append(", Claude Code ").Append(workspace.Claude.Busy ? "working" : workspace.Claude.Running ? "idle" : "not started");
+
+            if (workspace.SelfHosted) sb.Append(", your own source");
+            else if (!workspace.Dynamic) sb.Append(", configured");
+
+            if (workspace.Surface?.Paused == true) sb.Append(", paused");
+
+            if (workspaces.PendingPermissions(workspace.Id).Count is > 0 and int waiting)
+                sb.Append(", ").Append(waiting).Append(" permission request(s) waiting");
+
+            if (!string.IsNullOrWhiteSpace(workspace.Purpose)) sb.Append(". ").Append(workspace.Purpose.Trim());
+
+            sb.AppendLine();
+        }
+
+        if (sb.Length == 0) sb.AppendLine("No coding projects are open.");
+
+        if (workspaces.Closed is { Count: > 0 } closed)
+            sb.Append("Closed, reopened by name: ").AppendJoin(", ", closed).AppendLine();
+
+        return ValueTask.FromResult(ToolResult.Ok(sb.ToString().TrimEnd()));
     }
 }
 

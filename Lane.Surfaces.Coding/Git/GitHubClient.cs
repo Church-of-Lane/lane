@@ -11,12 +11,13 @@ public sealed record GitHubRepository(string Owner, string Name)
     public override string ToString() => $"{Owner}/{Name}";
 }
 
-/// <summary>Read-only access to a repository's issues, with a personal access token.</summary>
+/// <summary>Reads a repository's issues and creates repositories, with a personal access token.</summary>
 public sealed partial class GitHubClient(HttpClient http, string token)
 {
     public const string HttpClientName = "lane-github";
 
-    private const int MaxBody = 4_000;
+    private const int MaxBody        = 4_000;
+    private const int MaxDescription = 350;
 
     /// <summary>Accepts https and ssh forms of a github.com remote; anything else is null.</summary>
     public static GitHubRepository? ParseRemote(string? url)
@@ -90,9 +91,44 @@ public sealed partial class GitHubClient(HttpClient http, string token)
         return sb.ToString().TrimEnd();
     }
 
-    private async Task<JsonDocument> GetAsync(string path, CancellationToken ct)
+    /// <summary>Creates an empty repository, in the token's own account when <paramref name="owner"/> is null or names it.</summary>
+    public async Task<GitHubRepository> CreateRepositoryAsync(
+        string? owner, string name, string? description, bool isPrivate, CancellationToken ct)
     {
-        using HttpRequestMessage request = new(HttpMethod.Get, new Uri(new Uri("https://api.github.com/"), path));
+        string path = "user/repos";
+
+        if (owner is not null)
+        {
+            using JsonDocument user = await GetAsync("user", ct).ConfigureAwait(false);
+
+            if (!string.Equals(user.RootElement.GetProperty("login").GetString(), owner, StringComparison.OrdinalIgnoreCase))
+                path = $"orgs/{Uri.EscapeDataString(owner)}/repos";
+        }
+
+        Dictionary<string, object> body = new() { ["name"] = name, ["private"] = isPrivate };
+
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            string flat = Whitespace().Replace(description.Trim(), " ");
+
+            body["description"] = flat.Length <= MaxDescription ? flat : flat[..MaxDescription];
+        }
+
+        using JsonDocument created = await SendAsync(HttpMethod.Post, path, body, ct).ConfigureAwait(false);
+
+        return new GitHubRepository(
+            created.RootElement.GetProperty("owner").GetProperty("login").GetString()!,
+            created.RootElement.GetProperty("name").GetString()!);
+    }
+
+    private Task<JsonDocument> GetAsync(string path, CancellationToken ct) => SendAsync(HttpMethod.Get, path, null, ct);
+
+    private async Task<JsonDocument> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    {
+        using HttpRequestMessage request = new(method, new Uri(new Uri("https://api.github.com/"), path));
+
+        if (body is not null)
+            request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");
@@ -108,6 +144,7 @@ public sealed partial class GitHubClient(HttpClient http, string token)
                 HttpStatusCode.NotFound     => "not found, or the token cannot see it",
                 HttpStatusCode.Unauthorized => "the token was rejected",
                 HttpStatusCode.Forbidden    => "forbidden, or rate limited",
+                HttpStatusCode.UnprocessableEntity => await RefusalAsync(response, ct).ConfigureAwait(false),
                 _                           => ((int)response.StatusCode).ToString()
             };
 
@@ -117,6 +154,28 @@ public sealed partial class GitHubClient(HttpClient http, string token)
         Stream stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
 
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    private static async Task<string> RefusalAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+
+            List<string?> parts = [doc.RootElement.TryGetProperty("message", out JsonElement m) ? m.GetString() : null];
+
+            if (doc.RootElement.TryGetProperty("errors", out JsonElement errors) && errors.ValueKind == JsonValueKind.Array)
+                parts.AddRange(errors.EnumerateArray().Select(e =>
+                    e.ValueKind == JsonValueKind.Object && e.TryGetProperty("message", out JsonElement em) ? em.GetString() : null));
+
+            string detail = string.Join("; ", parts.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p!.Trim().TrimEnd('.')));
+
+            return detail.Length > 0 ? $"no: {detail}" : "the request was not valid";
+        }
+        catch (JsonException)
+        {
+            return "the request was not valid";
+        }
     }
 
     private static string Clip(string? text)
@@ -130,6 +189,9 @@ public sealed partial class GitHubClient(HttpClient http, string token)
 
     [GeneratedRegex(@"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)(?<owner>[\w.-]+)/(?<repo>[\w.-]+?)(?:\.git)?/?$")]
     private static partial Regex RemotePattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
 }
 
 public sealed class GitHubException(string message) : Exception(message);

@@ -21,6 +21,9 @@ public interface ICodingWorkspaces
 {
     IReadOnlyCollection<CodingWorkspace> All { get; }
 
+    /// <summary>Names of projects under the workspaces root that are not open and would reopen by that name.</summary>
+    IReadOnlyList<string> Closed { get; }
+
     bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace);
 
     CodingWorkspace? Find(string id);
@@ -64,6 +67,22 @@ public sealed partial class CodingWorkspaceManager(
     private readonly ILogger _log = loggers.CreateLogger<CodingWorkspaceManager>();
 
     public IReadOnlyCollection<CodingWorkspace> All => [.. _workspaces.Values.OrderBy(w => w.Id, StringComparer.Ordinal)];
+
+    public IReadOnlyList<string> Closed
+    {
+        get
+        {
+            string root = options.ResolvedWorkspacesRoot;
+
+            if (!Directory.Exists(root)) return [];
+
+            return [.. Directory.EnumerateDirectories(root)
+                .Where(d => Directory.Exists(Path.Combine(d, ".git")))
+                .Select(d => Path.GetFileName(d))
+                .Where(id => Slug(id) == id && !_workspaces.ContainsKey(id))
+                .Order(StringComparer.Ordinal)];
+        }
+    }
 
     public bool TryGet(SurfaceId surface, [NotNullWhen(true)] out CodingWorkspace? workspace)
     {

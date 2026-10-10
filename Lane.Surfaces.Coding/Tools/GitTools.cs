@@ -10,22 +10,28 @@ public sealed class GitTool : Tool<GitTool.Args>
 {
     public sealed record Args(
         [property: Description(
-            "status | diff | log | commit | branches | switch | pull | push | set_remote. " +
+            "status | diff | log | commit | branches | switch | pull | push | set_remote | create_github_repo. " +
             "commit stages every change first. switch needs name, and create to make a new branch. " +
-            "set_remote needs url.")]
+            "set_remote needs url. create_github_repo makes a new GitHub repository, sets it as origin and " +
+            "pushes the current branch to it.")]
         string Action,
         [property: Description("Commit message, for commit.")] string? Message = null,
-        [property: Description("Branch name, for switch.")] string? Name = null,
+        [property: Description(
+            "Branch name, for switch. For create_github_repo: the repository's name, or owner/name to put it in " +
+            "an organisation; left out, it is the project's id.")]
+        string? Name = null,
         [property: Description("For switch: create the branch.")] bool Create = false,
         [property: Description("For diff: only what is staged.")] bool Staged = false,
         [property: Description("For diff: limit to one path.")] string? Path = null,
         [property: Description("For log: how many commits.")] int Count = 15,
-        [property: Description("For set_remote: an https URL for origin.")] string? Url = null);
+        [property: Description("For set_remote: an https URL for origin.")] string? Url = null,
+        [property: Description("For create_github_repo: make it public. It is private otherwise.")] bool Public = false);
 
     protected override string Name => "git";
 
     protected override string Description =>
-        "Use git in this coding session's repository, as yourself. Pushing uses the configured GitHub token. " +
+        "Use git in this coding session's repository, as yourself. Pushing, and creating a GitHub repository for " +
+        "it, use the configured GitHub token. " +
         "There is no force-push, reset or clean.";
 
     protected override ToolSafety Safety => ToolSafety.Mutating;
@@ -103,6 +109,45 @@ public sealed class GitTool : Tool<GitTool.Args>
                     : ["remote", "add", "origin", uri.ToString()];
 
                 return Report(await git.RunAsync(ct, command).ConfigureAwait(false), $"origin is now {uri}.");
+            }
+
+            case "create_github_repo":
+            {
+                if (workspace.GitHub is null) return ToolResult.Error("No GitHub token is configured for this workspace.");
+
+                if (await git.OriginAsync(ct).ConfigureAwait(false) is { } origin)
+                    return ToolResult.Error($"This repository already has an origin: {origin}");
+
+                string[] parts = (string.IsNullOrWhiteSpace(args.Name) ? workspace.Id : args.Name.Trim()).Split('/');
+
+                if (parts.Length > 2 || parts.Any(string.IsNullOrWhiteSpace))
+                    return ToolResult.Error("The repository name must be name or owner/name.");
+
+                GitHubRepository created;
+
+                try
+                {
+                    created = await workspace.GitHub.CreateRepositoryAsync(
+                        parts.Length == 2 ? parts[0] : null, parts[^1], workspace.Purpose, !args.Public, ct).ConfigureAwait(false);
+                }
+                catch (GitHubException ex)
+                {
+                    return ToolResult.Error(ex.Message);
+                }
+
+                string url = $"https://github.com/{created}";
+
+                ProcessResult remote = await git.RunAsync(ct, "remote", "add", "origin", url + ".git").ConfigureAwait(false);
+
+                if (!remote.Succeeded) return ToolResult.Error($"Created {url}, but could not set it as origin: {remote.Output.Trim()}");
+
+                ProcessResult push = await git.RunAsync(ct, "push", "-u", "origin", "HEAD").ConfigureAwait(false);
+
+                string what = $"Created {url}, {(args.Public ? "public" : "private")}, and set it as origin";
+
+                return push.Succeeded
+                    ? ToolResult.Ok($"{what}, and pushed this branch to it.")
+                    : ToolResult.Error($"{what}, but the push failed: {push.Output.Trim()}");
             }
 
             default:

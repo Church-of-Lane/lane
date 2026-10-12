@@ -12,6 +12,8 @@ namespace Lane.Surfaces.Api.Endpoints;
 
 public static class MessageEndpoints
 {
+    private static readonly string[] ImageTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
     public static void Map(IEndpointRouteBuilder app) =>
         app.MapPost("/v1/sessions/{key}/messages", SendAsync);
 
@@ -30,8 +32,15 @@ public static class MessageEndpoints
 
         if (!ApiKeys.IsValid(key)) return Errors.BadKey(key);
 
-        if (body is null || string.IsNullOrWhiteSpace(body.Text))
-            return Results.BadRequest(new ErrorResponse("empty_message", "A message needs some text."));
+        List<ContentPart> content = [];
+
+        if (!string.IsNullOrWhiteSpace(body?.Text)) content.Add(new TextPart(body.Text.Trim()));
+
+        if (ReadImages(body?.Images, options, content) is { } problem)
+            return Results.BadRequest(new ErrorResponse("invalid_image", problem));
+
+        if (content.Count == 0)
+            return Results.BadRequest(new ErrorResponse("empty_message", "A message needs some text or an image."));
 
         if (!await ApiAuth.ChargeAsync(context, client, ct).ConfigureAwait(false)) return ApiAuth.OutOfCredits(client);
 
@@ -39,8 +48,7 @@ public static class MessageEndpoints
 
         ApiSessionEntry entry = map.Ensure(client, key, SessionKind.Api, author);
 
-        LaneMessage message = LaneMessage.User(
-            entry.Id, author, body.Text.Trim(), DateTimeOffset.UtcNow, body.ExternalId);
+        LaneMessage message = LaneMessage.User(entry.Id, author, content, DateTimeOffset.UtcNow, body.ExternalId);
 
         InboundEvent inbound = new()
         {
@@ -175,6 +183,59 @@ public static class MessageEndpoints
         try { await writer.SendAsync(name, payload, CancellationToken.None).ConfigureAwait(false); }
         catch (Exception) { /* the client is already gone */ }
     }
+
+    /// <summary>Appends each image to <paramref name="content"/>. Returns what is wrong with the first unusable one.</summary>
+    private static string? ReadImages(IReadOnlyList<ApiImage>? images, ApiSurfaceOptions options, List<ContentPart> content)
+    {
+        if (images is not { Count: > 0 }) return null;
+
+        if (images.Count > options.MaxImages) return $"A message can carry at most {options.MaxImages} images.";
+
+        foreach (ApiImage? image in images)
+        {
+            bool hasUrl  = !string.IsNullOrWhiteSpace(image?.Url);
+            bool hasData = !string.IsNullOrWhiteSpace(image?.Data);
+
+            if (image is null || hasUrl == hasData) return "Each image needs either a url or data, not both.";
+
+            string? type = image.MediaType?.Trim().ToLowerInvariant();
+
+            if (type is not null && !ImageTypes.Contains(type))
+                return $"Image media types are {string.Join(", ", ImageTypes)}.";
+
+            if (hasUrl)
+            {
+                if (!Uri.TryCreate(image.Url!.Trim(), UriKind.Absolute, out Uri? url) ||
+                    (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+                    return "Image urls must be absolute http or https links.";
+
+                content.Add(new ImagePart(url, null, type ?? "image/*"));
+                continue;
+            }
+
+            if (type is null) return "An image sent as data needs a mediaType.";
+
+            string encoded = image.Data!.Trim();
+
+            if (encoded.Length / 4 * 3 > options.MaxImageBytes + 2) return TooLarge(options);
+
+            byte[] bytes;
+
+            try { bytes = Convert.FromBase64String(encoded); }
+            catch (FormatException) { return "Image data must be base64."; }
+
+            if (bytes.Length == 0) return "Image data must be base64.";
+
+            if (bytes.Length > options.MaxImageBytes) return TooLarge(options);
+
+            content.Add(new ImagePart(null, bytes, type));
+        }
+
+        return null;
+    }
+
+    private static string TooLarge(ApiSurfaceOptions options) =>
+        $"Images sent as data can be at most {options.MaxImageBytes} bytes.";
 
     /// <summary>
     /// Who is speaking.

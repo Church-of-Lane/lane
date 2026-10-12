@@ -52,7 +52,8 @@ Errors come back as `{ "error": "<code>", "detail": "<human-readable explanation
 | Status | `error` | When |
 |---|---|---|
 | 400 | `invalid_key` | The session key contains characters that aren't allowed (see below) |
-| 400 | `empty_message` | The message has no text |
+| 400 | `empty_message` | The message has neither text nor an image |
+| 400 | `invalid_image` | An image is malformed, too large, or there are too many (see [Images](#images)) |
 | 400 | `not_a_websocket`, `unsupported_format`, `conflicting_speaker` | Voice socket problems (see below) |
 | 401 | `unauthorized` | No key, or a key Lane doesn't recognise |
 | 402 | `out_of_credits` | A sponsored client whose sponsors can't pay |
@@ -175,7 +176,8 @@ POST /v1/sessions/{key}/messages
 
 | Field | Meaning |
 |---|---|
-| `text` | *Required.* The message. |
+| `text` | The message. Required unless there are `images`. |
+| `images` | Pictures to show Lane with the message. See [Images](#images). |
 | `author` | Who's speaking, if your app relays more than one person. Leave it out and the message comes from your client itself. See [identities](identities.md#api-clients). |
 | `requiresResponse` | Defaults to `true`. Set it to `false` for things Lane should hear and remember without answering, like context from your app or someone else's side of a conversation. |
 | `externalId` | Your own id for the message. It's stored with the message and returned in history. |
@@ -183,6 +185,33 @@ POST /v1/sessions/{key}/messages
 **Lane can choose not to reply.** In a session that isn't direct, a small model first decides whether the message was
 meant for her. When she's out of energy, she sleeps through anything that doesn't use her name. Your app should treat
 "no reply" as a normal outcome.
+
+### Images
+
+```
+POST /v1/sessions/{key}/messages
+{
+  "text": "what is this?",
+  "images": [
+    { "url": "https://example.com/cat.png" },
+    { "data": "iVBORw0KGgo…", "mediaType": "image/png" }
+  ]
+}
+```
+
+Each image is given one of two ways:
+
+- **`url`**: an absolute `http` or `https` link. Lane doesn't download it; the model's provider does, so it has to be
+  reachable from the public internet.
+- **`data`**: the file's bytes in base64 (plain base64, not a `data:` URL), with a `mediaType` of `image/png`,
+  `image/jpeg`, `image/gif` or `image/webp`.
+
+A message can carry up to `MaxImages` images (4 by default), and an image sent as `data` can be up to `MaxImageBytes`
+(5 MiB by default) once decoded. Anything else gets `400 invalid_image`, and nothing is charged.
+
+Whether Lane actually sees a picture depends on the model behind her; one without vision ignores or rejects it.
+In [history](#read-history), a message's images come back as `images: [{ url?, mediaType }]`. The bytes of an
+image sent as `data` are stored with the conversation but aren't returned.
 
 ### Fire and forget
 

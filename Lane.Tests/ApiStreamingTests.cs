@@ -169,6 +169,39 @@ public sealed class ApiStreamingTests
     }
 
     [Fact]
+    public async Task History_lists_images_without_their_bytes()
+    {
+        await using ApiFixture api = await ApiFixture.StartAsync(
+            ScriptedLanguageModel.Echoing("noted"),
+            services: s => s.AddSingleton<ITranscriptStore>(new InMemoryTranscriptStore()));
+
+        HttpClient client = api.Client();
+
+        await ApiFixture.SendAsync(client, "log", new
+        {
+            text   = "what is this?",
+            images = new object[]
+            {
+                new { url = "https://example.test/cat.png" },
+                new { data = Convert.ToBase64String(new byte[] { 1, 2, 3, 4 }), mediaType = "image/png" }
+            }
+        });
+
+        await WaitForTurnAsync(api, "api/Api/alpha/log");
+
+        JsonElement body = await ApiFixture.JsonAsync(await client.GetAsync("/v1/sessions/log/messages"));
+
+        JsonElement images = body.GetProperty("messages")[0].GetProperty("images");
+
+        Assert.Equal(2, images.GetArrayLength());
+        Assert.Equal("https://example.test/cat.png", images[0].GetProperty("url").GetString());
+        Assert.Equal("image/png", images[1].GetProperty("mediaType").GetString());
+        Assert.False(images[1].TryGetProperty("url", out _));
+        Assert.False(images[1].TryGetProperty("data", out _));
+        Assert.False(body.GetProperty("messages")[1].TryGetProperty("images", out _));
+    }
+
+    [Fact]
     public async Task A_client_cannot_read_another_clients_history()
     {
         await using ApiFixture api = await ApiFixture.StartAsync(

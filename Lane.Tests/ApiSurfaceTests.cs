@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Lane.Core.Identity;
+using Lane.Core.Messages;
 using Lane.Surfaces.Api;
 using Lane.Testing;
 using Xunit;
@@ -184,6 +185,97 @@ public sealed class ApiSurfaceTests
         HttpResponseMessage response = await ApiFixture.SendAsync(api.Client(), "main", new { text = "   " });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Images_reach_the_model()
+    {
+        ScriptedLanguageModel model = ScriptedLanguageModel.Echoing("ok");
+
+        await using ApiFixture api = await ApiFixture.StartAsync(model);
+
+        HttpClient client = api.Client();
+
+        byte[] pixels = [1, 2, 3, 4];
+
+        HttpResponseMessage response = await ApiFixture.SendAsync(client, "main", new
+        {
+            text   = "what is this?",
+            images = new object[]
+            {
+                new { url = "https://example.test/cat.png" },
+                new { data = Convert.ToBase64String(pixels), mediaType = "image/png" }
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        List<ImagePart> seen = [];
+
+        for (int attempt = 0; attempt < 150 && seen.Count == 0; attempt++)
+        {
+            await Task.Delay(20);
+
+            seen = [.. model.Requests.SelectMany(r => r.Messages).SelectMany(m => m.Content).OfType<ImagePart>().Take(2)];
+        }
+
+        Assert.Equal(2, seen.Count);
+        Assert.Equal(new Uri("https://example.test/cat.png"), seen[0].Url);
+        Assert.Equal(pixels, seen[1].Data!.Value.ToArray());
+        Assert.Equal("image/png", seen[1].MediaType);
+    }
+
+    [Fact]
+    public async Task An_image_needs_no_text_beside_it()
+    {
+        await using ApiFixture api = await ApiFixture.StartAsync();
+
+        HttpResponseMessage response = await ApiFixture.SendAsync(api.Client(), "main",
+            new { images = new[] { new { url = "https://example.test/cat.png" } } });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unusable_images_are_rejected()
+    {
+        await using ApiFixture api = await ApiFixture.StartAsync(configure: o =>
+        {
+            o.MaxImages     = 2;
+            o.MaxImageBytes = 8;
+        });
+
+        HttpClient client = api.Client();
+
+        string small = Convert.ToBase64String(new byte[8]);
+
+        object[] bad =
+        [
+            new { },
+            new { url = "https://example.test/a.png", data = small, mediaType = "image/png" },
+            new { url = "file:///etc/passwd" },
+            new { url = "cat.png" },
+            new { data = small },
+            new { data = small, mediaType = "image/svg+xml" },
+            new { data = "not base64!", mediaType = "image/png" },
+            new { data = Convert.ToBase64String(new byte[9]), mediaType = "image/png" }
+        ];
+
+        foreach (object image in bad)
+        {
+            HttpResponseMessage response = await ApiFixture.SendAsync(client, "main", new { text = "look", images = new[] { image } });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("invalid_image", (await ApiFixture.JsonAsync(response)).GetProperty("error").GetString());
+        }
+
+        object ok = new { data = small, mediaType = "image/png" };
+
+        Assert.Equal(HttpStatusCode.Accepted,
+            (await ApiFixture.SendAsync(client, "main", new { text = "look", images = new[] { ok, ok } })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await ApiFixture.SendAsync(client, "main", new { text = "look", images = new[] { ok, ok, ok } })).StatusCode);
     }
 
     [Fact]

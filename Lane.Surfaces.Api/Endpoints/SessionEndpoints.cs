@@ -161,7 +161,10 @@ public static class SessionEndpoints
         message.Author.DisplayName,
         message.TextContent,
         message.Timestamp,
-        message.ExternalId);
+        message.ExternalId,
+        message.Content.OfType<ImagePart>().ToList() is { Count: > 0 } images
+            ? [.. images.Select(image => new ImageResponse(image.Url?.ToString(), image.MediaType))]
+            : null);
 }
 
 internal static class Errors

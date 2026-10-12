@@ -32,12 +32,17 @@ public sealed record CreateSessionRequest(
 /// than talking to her.
 /// </param>
 public sealed record SendMessageRequest(
-    string  Text,
+    string? Text          = null,
     ApiAuthor? Author      = null,
     bool    RequiresResponse = true,
-    string? ExternalId    = null);
+    string? ExternalId    = null,
+    IReadOnlyList<ApiImage>? Images = null);
 
 public sealed record ApiAuthor(string Id, string? Name = null);
+
+/// <summary>An image by link or by value; exactly one of <paramref name="Url"/> or <paramref name="Data"/>.</summary>
+/// <param name="Data">Base64. Needs <paramref name="MediaType"/>.</param>
+public sealed record ApiImage(string? Url = null, string? Data = null, string? MediaType = null);
 
 // ---- responses ------------------------------------------------------------
 
@@ -64,7 +69,11 @@ public sealed record MessageResponse(
     string  Author,
     string  Text,
     DateTimeOffset Timestamp,
-    string? ExternalId);
+    string? ExternalId,
+    IReadOnlyList<ImageResponse>? Images = null);
+
+/// <param name="Url">Absent for an image that was sent by value; its bytes are not returned.</param>
+public sealed record ImageResponse(string? Url, string MediaType);
 
 public sealed record HistoryResponse(string SessionId, IReadOnlyList<MessageResponse> Messages);
 

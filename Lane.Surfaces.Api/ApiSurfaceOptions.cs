@@ -27,6 +27,12 @@ public sealed class ApiSurfaceOptions
     /// <summary>Ceiling on <c>?limit=</c> when reading history.</summary>
     public int MaxHistory { get; set; } = 500;
 
+    /// <summary>Most images one message may carry.</summary>
+    public int MaxImages { get; set; } = 4;
+
+    /// <summary>Largest image accepted by value, decoded.</summary>
+    public int MaxImageBytes { get; set; } = 5 * 1024 * 1024;
+
     /// <summary>Offer <c>WS /v1/sessions/{key}/voice</c>. Needs audio configured to do anything.</summary>
     public bool Voice { get; set; } = true;
 

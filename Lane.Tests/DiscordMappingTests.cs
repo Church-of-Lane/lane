@@ -459,4 +459,50 @@ public sealed class IdentityResolverTests
     {
         Assert.Null(DiscordMapper.RenderSystemNotice(type, "Alice", "hello"));
     }
+
+    // ---- reactions ---------------------------------------------------------
+
+    [Fact]
+    public void A_reaction_names_whose_message_it_was_and_quotes_it()
+    {
+        Assert.Equal(
+            "[Alice reacted 👍 to Bob's message: \"lunch at noon?\"]",
+            DiscordMapper.RenderReactionNotice("Alice", "👍", "Bob", "lunch\nat noon?"));
+    }
+
+    [Fact]
+    public void A_reaction_to_her_own_message_says_so()
+    {
+        Assert.Equal(
+            "[Alice reacted ❤️ to your message: \"good morning\"]",
+            DiscordMapper.RenderReactionNotice("Alice", "❤️", "Lane", "good morning", toLane: true));
+    }
+
+    [Fact]
+    public void A_reaction_to_a_message_she_may_not_read_quotes_nothing()
+    {
+        Assert.Equal(
+            "[Alice reacted 👍 to a message]",
+            DiscordMapper.RenderReactionNotice("Alice", "👍", null, "something private"));
+    }
+
+    [Fact]
+    public void A_custom_emoji_is_written_so_it_can_be_reacted_back_with()
+    {
+        string emoji = DiscordMapper.EmojiText("lanewave", 123);
+
+        Assert.Equal("<:lanewave:123>", emoji);
+        Assert.Equal(("lanewave", (ulong?)123), DiscordMapper.ParseEmoji(emoji));
+    }
+
+    [Fact]
+    public void A_quoted_reply_carries_the_reactions_already_on_it()
+    {
+        string reactions = DiscordMapper.RenderReactions([("👍", 3), ("🎉", 1)]);
+
+        Assert.Equal("👍×3 🎉", reactions);
+        Assert.Equal(
+            "this\n\n(replying to alice: \"the original\", reactions: 👍×3 🎉)",
+            DiscordMapper.AppendReplyContext("this", "alice", "the original", reactions));
+    }
 }

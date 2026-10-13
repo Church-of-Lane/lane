@@ -119,7 +119,7 @@ public sealed class ModelTurnStage(
                 Descriptor = ctx.Descriptor,
                 Requester  = RequesterOf(ctx),
                 Turn       = ctx.Kind,
-                TriggerExternalId = ctx.Incoming.LastOrDefault()?.ExternalId,
+                TriggerExternalId = ctx.Incoming.LastOrDefault(e => e.ExternalId is not null)?.ExternalId,
                 Energy     = tier,
                 Memory     = ctx.Items.TryGetValue("memory", out object? m) && m is MemoryContext mc ? mc : new(),
                 Services   = services,

@@ -114,6 +114,7 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
         _status = new DiscordStatusPublisher(WriteStatusAsync, log);
 
         _client.MessageCreate    += OnMessageCreate;
+        _client.MessageReactionAdd += OnMessageReactionAdd;
         _client.Ready            += OnReady;
         _client.Disconnect       += OnDisconnect;
         _client.GuildCreate      += OnGuildCreate;
@@ -543,6 +544,87 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
         }
     }
 
+    private ValueTask OnMessageReactionAdd(MessageReactionAddEventArgs args)
+    {
+        _ = Task.Run(() => IngestReactionAsync(args));
+
+        return default;
+    }
+
+    /// <summary>
+    /// Tells a conversation she is already in that someone reacted. Reactions in channels
+    /// with no open session are dropped, and the reacted-to message is only quoted when its
+    /// author is someone she may read.
+    /// </summary>
+    private async Task IngestReactionAsync(MessageReactionAddEventArgs args)
+    {
+        try
+        {
+            if (args.UserId == _client.Id) return;
+            if (!_openSessions.TryGetValue(args.ChannelId, out SessionId session)) return;
+
+            CancellationToken ct = _lifetime?.Token ?? CancellationToken.None;
+
+            User user = args.User ?? await _client.Rest.GetUserAsync(args.UserId, cancellationToken: ct).ConfigureAwait(false);
+
+            if (!await MayReadAsync(user, ct).ConfigureAwait(false)) return;
+
+            Participant author = ToParticipant(user);
+
+            string? targetAuthor = null;
+            string? targetText   = null;
+            bool    toLane       = args.MessageAuthorId == _client.Id;
+
+            try
+            {
+                RestMessage target = await _client.Rest
+                    .GetMessageAsync(args.ChannelId, args.MessageId, cancellationToken: ct).ConfigureAwait(false);
+
+                toLane = target.Author.Id == _client.Id;
+
+                if (toLane || await MayReadAsync(target.Author, ct).ConfigureAwait(false))
+                {
+                    targetAuthor = ToParticipant(target.Author).DisplayName;
+                    targetText   = WithEmbeds(target.Content, target.Embeds);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _log.LogDebug(ex, "Could not read the message reacted to in {Channel}", args.ChannelId);
+            }
+
+            string notice = DiscordMapper.RenderReactionNotice(
+                author.DisplayName,
+                DiscordMapper.EmojiText(args.Emoji.Name, args.Emoji.Id),
+                targetAuthor,
+                targetText,
+                toLane);
+
+            await _kernel.SubmitAsync(new InboundEvent
+            {
+                Session          = session,
+                Author           = author,
+                Message          = LaneMessage.Observation(session, author, notice, DateTimeOffset.UtcNow),
+                RequiresResponse = false
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogError(ex, "Failed to ingest a Discord reaction in {Channel}", args.ChannelId);
+        }
+    }
+
+    /// <summary>False for bots she does not listen to and for people who have not opted in.</summary>
+    private async ValueTask<bool> MayReadAsync(User user, CancellationToken ct)
+    {
+        if (user.IsBot) return _options.RespondToBots;
+
+        return !_options.RequireOptIn || await _consent.IsOptedInAsync(user.Id, ct).ConfigureAwait(false);
+    }
+
+    private static string ReactionsOn(RestMessage message) => DiscordMapper.RenderReactions(
+        [.. message.Reactions.Select(r => (DiscordMapper.EmojiText(r.Emoji.Name, r.Emoji.Id), r.Count))]);
+
     /// <summary>Charges the channel's sponsors for one message. Excluded channels are never sponsored.</summary>
     private async ValueTask<bool> SponsoredAsync(ulong channelId) =>
         _sponsored is not null &&
@@ -587,7 +669,8 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
             message.ReferencedMessage is { } replied
                 ? DiscordMapper.DisplayNameOf(replied.Author.GlobalName, replied.Author.Username)
                 : null,
-            message.ReferencedMessage is { } quoted ? WithEmbeds(quoted.Content, quoted.Embeds) : null);
+            message.ReferencedMessage is { } quoted ? WithEmbeds(quoted.Content, quoted.Embeds) : null,
+            message.ReferencedMessage is { } reacted ? ReactionsOn(reacted) : null);
 
         List<ContentPart> parts = [];
 

@@ -99,11 +99,46 @@ internal static class DiscordMapper
     }
 
     /// <summary>Adds the quoted message a reply was aimed at, so the reference is not lost.</summary>
-    public static string AppendReplyContext(string content, string? replyAuthor, string? replyContent)
+    public static string AppendReplyContext(
+        string content, string? replyAuthor, string? replyContent, string? replyReactions = null)
     {
         if (string.IsNullOrWhiteSpace(replyAuthor) || string.IsNullOrWhiteSpace(replyContent)) return content;
 
-        return $"{content}\n\n(replying to {replyAuthor}: \"{Truncate(replyContent, QuoteLimit)}\")";
+        string reactions = string.IsNullOrEmpty(replyReactions) ? "" : $", reactions: {replyReactions}";
+
+        return $"{content}\n\n(replying to {replyAuthor}: \"{Truncate(replyContent, QuoteLimit)}\"{reactions})";
+    }
+
+    /// <summary>
+    /// An emoji as text she can read and hand back to <see cref="ParseEmoji"/>: the character
+    /// itself, or <c>&lt;:name:id&gt;</c> for a custom one.
+    /// </summary>
+    public static string EmojiText(string? name, ulong? id) =>
+        id is { } custom ? $"<:{name}:{custom}>" : name ?? "";
+
+    /// <summary>The reactions on a message as one line, each with its count where more than one person gave it.</summary>
+    public static string RenderReactions(IReadOnlyList<(string Emoji, int Count)> reactions) =>
+        string.Join(' ', reactions
+            .Where(r => r.Emoji.Length > 0 && r.Count > 0)
+            .Select(r => r.Count > 1 ? $"{r.Emoji}×{r.Count}" : r.Emoji));
+
+    /// <summary>
+    /// Someone reacting to a message, as a notice. The message is named by its author and
+    /// quoted where both are given; <paramref name="toLane"/> marks it as one of her own.
+    /// </summary>
+    public static string RenderReactionNotice(
+        string reactor, string emoji, string? messageAuthor, string? messageText, bool toLane = false)
+    {
+        string target = toLane                                  ? "your message"
+                      : string.IsNullOrWhiteSpace(messageAuthor) ? "a message"
+                      : messageAuthor == reactor                 ? "their own message"
+                      :                                            $"{messageAuthor}'s message";
+
+        string quote = string.IsNullOrWhiteSpace(messageText) || (!toLane && string.IsNullOrWhiteSpace(messageAuthor))
+            ? ""
+            : $": \"{Truncate(messageText.ReplaceLineEndings(" ").Trim(), ReactionQuoteLimit)}\"";
+
+        return $"[{reactor} reacted {emoji} to {target}{quote}]";
     }
 
     /// <summary>
@@ -179,6 +214,7 @@ internal static class DiscordMapper
     public const int MaxEmbeds = 5;
 
     private const int QuoteLimit      = 300;
+    private const int ReactionQuoteLimit = 120;
     private const int DescriptionLimit = 600;
     private const int FieldValueLimit  = 200;
     private const int MaxFields        = 10;

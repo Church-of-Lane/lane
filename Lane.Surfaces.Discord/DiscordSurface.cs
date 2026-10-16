@@ -515,12 +515,7 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
             Attach(descriptor.Id, message.ChannelId);
 
             LaneMessage inbound = notice is null
-                ? LaneMessage.User(
-                    descriptor.Id,
-                    author,
-                    BuildContent(message, descriptor.Id, author),
-                    message.CreatedAt,
-                    message.Id.ToString())
+                ? Written(message, descriptor.Id, author)
                 : LaneMessage.Observation(descriptor.Id, author, notice, message.CreatedAt) with
                 {
                     ExternalId = message.Id.ToString()
@@ -633,6 +628,18 @@ public sealed class DiscordSurface : ISurface, IVoiceChannelHost
             SponsoredKind.DiscordChannel,
             channelId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             _lifetime?.Token ?? CancellationToken.None).ConfigureAwait(false);
+
+    private LaneMessage Written(Message message, SessionId session, Participant author)
+    {
+        LaneMessage written = LaneMessage.User(
+            session, author, BuildContent(message, session, author), message.CreatedAt, message.Id.ToString());
+
+        if (!written.Content.Any(p => p is ImagePart) ||
+            !DiscordMapper.SaysNothingButImages(message.Content, ToViews(message.Embeds)))
+            return written;
+
+        return written with { Metadata = new Dictionary<string, string> { [LaneMessage.ImagesOnlyKey] = "true" } };
+    }
 
     private IReadOnlyList<ContentPart> BuildContent(Message message, SessionId session, Participant author)
     {

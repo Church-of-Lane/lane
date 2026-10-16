@@ -74,10 +74,8 @@ public sealed class ModelTurnStage(
     {
         ILanguageModel model = models.Get(ModelRole.Respond, ctx.Descriptor);
 
-        List<LaneMessage> messages = [.. ctx.Context.InlineMessages, .. ctx.Incoming];
-
-        if (!model.Descriptor.Supports(ModelCapabilities.Audio))
-            messages = [.. messages.Select(m => m.WithoutAudio())];
+        List<LaneMessage> messages =
+            [.. ctx.Context.InlineMessages.Concat(ctx.Incoming).Select(m => m.For(model.Descriptor.Capabilities))];
 
         if (messages.Count == 0)
         {

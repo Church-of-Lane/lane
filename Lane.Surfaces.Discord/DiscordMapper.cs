@@ -187,6 +187,14 @@ internal static class DiscordMapper
         _ => null
     };
 
+    /// <summary>
+    /// True when a message with images has no words of its own: no content and no embed
+    /// carrying a title or description, so its text would only list the images.
+    /// </summary>
+    public static bool SaysNothingButImages(string? content, IReadOnlyList<EmbedView> embeds) =>
+        string.IsNullOrWhiteSpace(content) &&
+        embeds.All(e => string.IsNullOrWhiteSpace(e.Title) && string.IsNullOrWhiteSpace(e.Description));
+
     /// <summary>One line per attachment, so the url of an image or file is something she can quote and pass on.</summary>
     public static string RenderAttachments(IReadOnlyList<(string FileName, string Url, string? ContentType)> attachments)
     {

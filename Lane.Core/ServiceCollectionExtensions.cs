@@ -82,6 +82,10 @@ public static class ServiceCollectionExtensions
         // policy, because that gate is a model call. Sleeping is strictly cheaper than waking.
         services.AddSingleton<ITurnStage, SleepGateStage>();
 
+        // Before assembly and the response policy for the same reason as sleep: a message she
+        // cannot see should not cost a memory read or a model call.
+        services.AddSingleton<ITurnStage, CapabilityGateStage>();
+
         services.AddSingleton<ITurnStage, ContextAssemblyStage>();
 
         // After assembly, because deciding whether a message was meant for Lane needs the

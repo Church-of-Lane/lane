@@ -1,5 +1,7 @@
 using Lane.Core.Identity;
 
+using Lane.Core.Models;
+
 namespace Lane.Core.Messages;
 
 /// <summary>Time-ordered so it doubles as a good database primary key.</summary>
@@ -62,6 +64,67 @@ public sealed record LaneMessage
 
     public LaneMessage WithoutAudio() =>
         Content.Any(p => p is AudioPart) ? this with { Content = [.. Content.Where(p => p is not AudioPart)] } : this;
+
+    /// <summary>
+    /// <see cref="Metadata"/> key a surface sets when a message's text only describes the images
+    /// on it, such as Discord's attachment listing, so it says nothing to a model that cannot see them.
+    /// </summary>
+    public const string ImagesOnlyKey = "images-only";
+
+    /// <summary>Stands in for an image sent to a model without <see cref="ModelCapabilities.Images"/>.</summary>
+    public const string UnseenImage = "[an image you cannot see]";
+
+    /// <summary>True when nothing in the message can be understood without seeing its images.</summary>
+    public bool NeedsImages =>
+        Content.Any(p => p is ImagePart) &&
+        (Metadata?.ContainsKey(ImagesOnlyKey) == true ||
+         !Content.OfType<TextPart>().Any(t => !string.IsNullOrWhiteSpace(t.Text)));
+
+    /// <summary>
+    /// This message as a model with the given capabilities can take it. Audio is dropped;
+    /// images, including those in tool results, become <see cref="UnseenImage"/>.
+    /// </summary>
+    public LaneMessage For(ModelCapabilities capabilities)
+    {
+        bool audio  = capabilities.HasFlag(ModelCapabilities.Audio);
+        bool images = capabilities.HasFlag(ModelCapabilities.Images);
+
+        if (audio && images) return this;
+        if (!Content.Any(p => (p is AudioPart && !audio) || (!images && HasImage(p)))) return this;
+
+        return this with { Content = Strip(Content, audio, images) };
+    }
+
+    private static bool HasImage(ContentPart part) =>
+        part is ImagePart || part is ToolResultPart result && result.Content.Any(HasImage);
+
+    private static List<ContentPart> Strip(IReadOnlyList<ContentPart> content, bool audio, bool images)
+    {
+        List<ContentPart> kept = [];
+
+        foreach (ContentPart part in content)
+        {
+            switch (part)
+            {
+                case AudioPart when !audio:
+                    break;
+
+                case ImagePart when !images:
+                    kept.Add(new TextPart(UnseenImage));
+                    break;
+
+                case ToolResultPart result when !images && result.Content.Any(HasImage):
+                    kept.Add(result with { Content = Strip(result.Content, audio, images) });
+                    break;
+
+                default:
+                    kept.Add(part);
+                    break;
+            }
+        }
+
+        return kept;
+    }
 
     public static LaneMessage User(
         SessionId session, Participant author, string text, DateTimeOffset timestamp, string? externalId = null) =>

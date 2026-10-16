@@ -1,3 +1,4 @@
+using Lane.Core.Models;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -190,7 +191,8 @@ public sealed class ApiSurfaceTests
     [Fact]
     public async Task Images_reach_the_model()
     {
-        ScriptedLanguageModel model = ScriptedLanguageModel.Echoing("ok");
+        ScriptedLanguageModel model = new((_, _) => ScriptedLanguageModel.Text("ok"),
+            capabilities: ModelCapabilities.Tools | ModelCapabilities.Streaming | ModelCapabilities.Images);
 
         await using ApiFixture api = await ApiFixture.StartAsync(model);
 

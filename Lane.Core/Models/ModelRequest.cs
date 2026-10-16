@@ -44,9 +44,7 @@ public sealed record ModelRequest
 
     /// <summary>This request as a model with the given capabilities can take it.</summary>
     public ModelRequest For(ModelCapabilities capabilities) =>
-        capabilities.HasFlag(ModelCapabilities.Audio) || !Messages.Any(m => m.Content.Any(p => p is AudioPart))
-            ? this
-            : this with { Messages = [.. Messages.Select(m => m.WithoutAudio())] };
+        this with { Messages = [.. Messages.Select(m => m.For(capabilities))] };
 
     public IReadOnlyList<ToolDescriptor> Tools { get; init; } = [];
     public ToolChoice     ToolChoice     { get; init; } = ToolChoice.Auto;
